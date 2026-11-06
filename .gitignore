@@ -1,0 +1,14 @@
+/catalogo.json
+/catalogos.json
+/dataapp.sqlite3*
+/dataapp.log
+/dataapp-error.log
+/.qa-*/
+/datos/
+/planillas/
+/DataApp - Especificación maestra.md
+*.xlsx
+*.xlsm
+*.sqlite3*
+.env
+__pycache__/

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data App · CRM de ferias</title>
+  <link rel="stylesheet" href="estilos.css"><link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#064c3c"><script type="module" src="app.js"></script>
+</head>
+<body>
+  <section id="acceso" class="acceso" hidden>
+    <div class="presentacion">
+      <div class="marca"><span class="simbolo">D</span>Data App</div>
+      <span class="etiqueta">DATAPAR · CONEXIONES QUE CRECEN</span>
+      <h1>Cada encuentro,<br>una oportunidad.</h1>
+      <p>Tu equipo, tus ferias y tus relaciones comerciales en un mismo lugar.</p>
+      <div class="grafico" aria-hidden="true"><span>Empresas</span><span>Contactos</span><span>Oportunidades</span></div>
+      <small>CRM de ferias y eventos · Paraguay</small>
+    </div>
+    <div class="acceso-form">
+      <span class="etiqueta">BIENVENIDA A DATA APP</span>
+      <h2 id="acceso-titulo">Ingresá a tu espacio</h2>
+      <p id="acceso-texto">Consultá tus ferias y continuá donde lo dejaste.</p>
+      <form id="login">
+        <div id="nombre-inicial"><label for="nombre-usuario">Tu nombre</label><input id="nombre-usuario" name="name" autocomplete="name" maxlength="150" required></div>
+        <label for="email">Correo electrónico</label><input id="email" name="email" type="email" autocomplete="username" required maxlength="200" placeholder="nombre@datapar.com.py">
+        <div id="rol-ingreso" hidden><label for="login-rol">Rol</label><select id="login-rol" name="role" required disabled><option value="">Elegí tu rol</option><option value="consultor">Consultor de ventas</option><option value="sdr">SDR</option><option value="marketing">Marketing</option></select></div>
+        <label for="password">Contraseña</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="200">
+        <button class="primario" id="ingresar">Ingresar a Data App →</button>
+      </form>
+      <p id="error-login" role="alert"></p>
+      <p class="ayuda">Tus datos se guardan en esta computadora. Para usar la aplicación, mantené Data App iniciada.</p>
+    </div>
+  </section>
+  <div id="aplicacion" class="aplicacion" hidden>
+    <aside class="lateral">
+      <div class="marca"><span class="simbolo">D</span>Data App</div>
+      <small class="etiqueta">ESPACIO COMERCIAL</small>
+      <button id="inicio" class="nav activo">◈ &nbsp; Ferias y eventos</button>
+      <button id="cartera" class="nav">▤ &nbsp; Mi cartera</button>
+      <button id="pendientes" class="nav">◷ &nbsp; Mis pendientes</button>
+      <button id="registro-actividad" class="nav">▣ &nbsp; Registro de actividad</button>
+      <button id="usuarios" class="nav" hidden>＋ &nbsp; Usuarios del equipo</button>
+      <div class="lateral-pie"><span class="avatar" id="iniciales"></span><strong id="usuario"></strong><small id="rol"></small><button id="salir" class="nav">Cerrar sesión</button></div>
+    </aside>
+    <main>
+      <header class="barra"><span>Datapar <span class="separador">/</span> Gestión comercial</span><span id="conexion" class="insignia" role="status">Conectando…</span></header>
+      <div class="contenido">
+        <button id="sincronizar" class="secundario" hidden>Sincronizar cambios</button>
+        <p id="sync-estado" class="ayuda" role="status"></p>
+        <div id="portada">
+          <span class="etiqueta">TU AGENDA COMERCIAL</span><h1>Ferias y eventos</h1>
+          <p class="subtitulo">Elegí una feria para consultar sus empresas y registrar nuevas oportunidades.</p>
+          <div id="metricas" class="metricas"></div><div id="ferias" class="ferias"></div>
+          <button id="agregar-feria" class="primario" hidden>Agregar feria</button>
+          <button id="ferias-archivadas" class="secundario" hidden>Ferias archivadas</button>
+          <div id="lista-archivadas" hidden></div>
+          <form id="nueva-feria" class="panel formulario-equipo" hidden>
+            <h2>Nueva feria</h2>
+            <label for="feria-nombre-nueva">Nombre de la feria</label><input id="feria-nombre-nueva" name="name" required maxlength="120">
+            <label for="feria-pestana">Nombre de la pestaña en Excel</label><input id="feria-pestana" name="sheet" placeholder="Empresas" maxlength="31">
+            <p class="ayuda">Después de crearla podés importar un Excel o descargar la plantilla desde la feria.</p>
+            <button class="primario">Crear feria</button>
+            <button id="cancelar-feria" class="secundario" type="button">Cancelar</button>
+            <p id="nueva-feria-estado" role="status"></p>
+          </form>
+          <button id="actualizar-bases" class="secundario" hidden>Actualizar desde las planillas</button>
+          <p id="actualizar-estado" class="ayuda" role="status"></p>
+          <p class="ayuda">Cada feria tiene su propio catálogo e historial de actividades.</p>
+        </div>
+        <section id="catalogo" hidden>
+          <button id="volver" class="texto">← Todas las ferias</button>
+          <div class="titulo-fila"><div><span class="etiqueta">CATÁLOGO DE EMPRESAS</span><h1 id="feria-titulo"></h1><p id="fuente" class="subtitulo"></p></div></div>
+          <div class="busqueda"><label for="buscar">Buscar empresas</label><input id="buscar" type="search" placeholder="Empresa, contacto, teléfono, consultor, stand…"><p id="cantidad" role="status"></p></div>
+          <div class="acciones-excel">
+            <a id="exportar" class="secundario">Exportar Excel</a>
+            <label id="importar-etiqueta" class="secundario" for="importar" hidden>Importar Excel</label>
+            <input id="importar" type="file" accept=".xlsx" class="solo-lectores" aria-label="Importar Excel de esta feria" hidden>
+            <button id="editar-feria" class="secundario">Editar feria</button>
+            <button id="eliminar-feria" class="secundario">Eliminar feria</button>
+            <span id="estado-excel" class="ayuda" role="status"></span>
+          </div>
+          <form id="renombrar-feria" class="panel formulario-equipo" hidden>
+            <label for="feria-nombre-editar">Nombre de la feria</label><input id="feria-nombre-editar" name="name" maxlength="120" required>
+            <button class="primario">Guardar feria</button>
+            <button id="cancelar-renombre" class="secundario" type="button">Cancelar</button>
+            <p id="renombrar-estado" role="status"></p>
+          </form>
+          <div class="tabla-contenedor"><table><thead><tr><th>Empresa</th><th>Rubro</th><th>Consultor</th><th>Stand / lote</th><th>Visita</th><th></th></tr></thead><tbody id="empresas"></tbody></table></div>
+        </section>
+        <section id="auditoria" hidden>
+          <h1>Registro de actividad</h1>
+          <p id="auditoria-alcance" class="subtitulo"></p>
+          <div id="auditoria-lista"></div>
+          <button id="auditoria-mas" class="secundario" hidden>Ver más</button>
+        </section>
+        <section id="equipo" hidden>
+          <span class="etiqueta">ADMINISTRACIÓN</span><h1>Sumá a tu equipo</h1><p class="subtitulo">Cada consultor ingresa con su correo y contraseña. Sus actividades quedan identificadas con su nombre.</p>
+          <form id="nuevo-usuario" class="panel formulario-equipo"><label for="equipo-nombre">Nombre</label><input id="equipo-nombre" name="name" required maxlength="150"><label for="equipo-correo">Correo</label><input id="equipo-correo" name="email" type="email" required maxlength="200"><label for="equipo-clave">Contraseña inicial</label><input id="equipo-clave" name="password" type="password" minlength="10" maxlength="200" required autocomplete="new-password"><small>Al menos 10 caracteres.</small><div id="nuevo-perfil"></div><button class="primario">Crear cuenta</button><p id="equipo-estado" role="status"></p></form>
+          <h2>Cuentas del equipo</h2>
+          <div id="cuentas-equipo"></div>
+        </section>
+        <p id="mensaje" role="alert"></p>
+      </div>
+    </main>
+  </div>
+  <dialog id="ficha" aria-labelledby="empresa-nombre">
+    <div class="ficha-encabezado"><div><span id="ficha-feria" class="etiqueta"></span><h2 id="empresa-nombre"></h2><p id="ficha-origen" class="ayuda"></p></div><button id="cerrar" class="secundario">Cerrar ✕</button></div>
+    <p id="ficha-mensaje" role="status"></p>
+    <div id="ficha-resumen">
+      <div class="resumen-acciones">
+        <span id="resumen-estado" class="insignia"></span>
+        <button id="abrir-edicion" class="primario">Editar o agregar registro</button>
+      </div>
+      <div class="resumen-secciones">
+        <section><h3>Datos de la empresa</h3><dl id="resumen-datos" class="resumen-datos"></dl></section>
+        <section><h3>Contactos</h3><div id="resumen-contactos"></div></section>
+        <section><h3>Visitas y seguimientos</h3><div id="resumen-visitas"></div></section>
+      </div>
+      <details class="panel"><summary>Historial de cambios</summary><div id="historial"></div></details>
+    </div>
+    <div id="ficha-editor" hidden>
+      <button id="volver-resumen" class="texto">← Volver a la ficha</button>
+      <div class="pestanas" role="group" aria-label="Formularios de edición">
+        <button id="tab-datos" type="button">Datos de empresa</button>
+        <button id="tab-contacto" type="button">Contacto</button>
+        <button id="tab-actividad" type="button">Visita o seguimiento</button>
+      </div>
+      <section id="seccion-datos"><form id="editar"><div id="campos" class="campos"></div><div class="guardar-barra"><span>Los cambios quedan asociados a tu usuario.</span><button class="primario">Guardar cambios</button></div></form></section>
+      <form id="contacto" class="panel" hidden>
+        <h3 id="titulo-contacto">Agregar contacto</h3>
+        <label for="registro-contacto">Elegí un contacto o agregá uno nuevo</label><select id="registro-contacto"></select>
+        <label for="contacto-nombre">Nombre del contacto</label><input id="contacto-nombre" name="name" required maxlength="150">
+        <label for="contacto-cargo">Cargo</label><input id="contacto-cargo" name="position" maxlength="150">
+        <label for="contacto-email">Correo</label><input id="contacto-email" name="email" type="email" maxlength="200">
+        <label for="contacto-telefono">Teléfono</label><input id="contacto-telefono" name="phone" type="tel" maxlength="100">
+        <button class="primario">Guardar contacto</button>
+        <button id="eliminar-contacto" class="secundario" type="button" hidden>Eliminar contacto</button>
+      </form>
+      <form id="actividad" class="panel" hidden><h3 id="titulo-actividad">Registrar actividad</h3>
+        <label for="registro-visita">Elegí una visita o agregá una nueva</label><select id="registro-visita"></select>
+        <label for="visita-estado">Estado de visita</label><select id="visita-estado" name="status"><option value="REALIZADO">Realizado</option><option value="PENDIENTE">Pendiente</option><option value="SEGUIMIENTO">Seguimiento</option></select>
+        <label for="proxima-fecha">Próximo seguimiento</label><input id="proxima-fecha" name="nextDate" type="date">
+        <label for="notas">Observaciones</label><textarea id="notas" name="notes" rows="3" maxlength="5000"></textarea><div id="dictado-actividad"></div><button class="primario">Guardar actividad</button>
+        <button id="eliminar-visita" class="secundario" type="button" hidden>Eliminar visita</button>
+      </form>
+    </div>
+  </dialog>
+  <p id="cargando" class="cargando" role="status">Abriendo Data App…</p>
+</body>
+</html>

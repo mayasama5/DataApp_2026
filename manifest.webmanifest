@@ -1,0 +1,10 @@
+{
+  "id": "/",
+  "name": "Data App",
+  "short_name": "Data App",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f7f8",
+  "theme_color": "#064c3c",
+  "icons": [{ "src": "/icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
