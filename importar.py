@@ -24,10 +24,11 @@ def importar(ruta, evento_id, nombre, pestana, archivo=None):
         while columnas and columnas[-1] is None:
             columnas.pop()
         ids = bool(columnas and columnas[-1] == '__DATAAPP_ID')
+        tiene_origen = 'Data App' in libro
+        if (tiene_origen and libro['Data App']['A1'].value != evento_id) or (ids and not tiene_origen):
+            raise ValueError('La planilla exportada pertenece a otra feria o edición.')
         if ids:
             columnas.pop()
-            if 'Data App' not in libro or libro['Data App']['A1'].value != evento_id:
-                raise ValueError('La planilla exportada pertenece a otra feria.')
         bases = {}
         if ids and 'Data App Base' in libro:
             for fila_base in libro['Data App Base'].values:

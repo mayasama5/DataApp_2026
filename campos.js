@@ -12,12 +12,37 @@ const opcionesUnicas = {
   'STATUS VISITA': [['PENDIENTE', 'Pendiente'], ['REALIZADO', 'Realizado']],
 };
 
+const opcionesAdherente = [
+  ['', 'Sin indicar', null],
+  ['true', 'Sí', true],
+  ['false', 'No', false],
+  ['parceria', 'Parcería', 'Parcería'],
+];
+
 export function claveCampo(valor) {
   return String(valor ?? '').normalize('NFD').replace(/\p{M}/gu, '').trim().toUpperCase();
 }
 
 function claveOpcion(valor) {
   return claveCampo(valor).replace(/[^A-Z0-9]/g, '');
+}
+
+function claveAdherente(valor) {
+  const clave = claveOpcion(valor);
+  if (['TRUE', 'SI', 'ADHERENTE'].includes(clave)) return 'true';
+  if (['FALSE', 'NO', 'NOADHERENTE'].includes(clave)) return 'false';
+  if (clave === 'PARCERIA') return 'parceria';
+  if (clave === '' || clave === 'SININDICAR') return '';
+}
+
+export function tituloCampo(columna) {
+  if (claveCampo(columna) === 'ADHERENTE?') return 'Adherente';
+  if (claveCampo(columna) === 'RUBRO') return 'Rubro';
+  return columna.trim();
+}
+
+export function mostrarAdherente(valor) {
+  return opcionesAdherente.find(([clave]) => clave === claveAdherente(valor))?.[1] ?? String(valor);
 }
 
 function crear(etiqueta, contenido) {
@@ -68,9 +93,9 @@ function multiple(campo, titulo, opciones, valor) {
   } };
 }
 
-export function crearCampo(columna, indice, valor, asignaciones = {}) {
+export function crearCampo(columna, indice, valor, asignaciones = {}, rubros = []) {
   const campo = claveCampo(columna);
-  const titulo = campo === 'ADHERENTE?' ? 'Adherente / parcería' : columna.trim();
+  const titulo = tituloCampo(columna);
   if (Object.hasOwn(opcionesMultiples, campo)) {
     const opciones = [...opcionesMultiples[campo]];
     if (campo === 'CONSULTOR') {
@@ -85,7 +110,7 @@ export function crearCampo(columna, indice, valor, asignaciones = {}) {
   contenedor.className = ancho ? 'campo ancho' : 'campo';
   const etiqueta = crear('label', titulo);
   etiqueta.htmlFor = `campo-${indice}`;
-  const booleano = /^(CLIENTE\?|POTENCIAL |ADHERENTE\?)/.test(campo) || typeof valor === 'boolean';
+  const booleano = /^(CLIENTE\?|POTENCIAL )/.test(campo) || typeof valor === 'boolean';
   let opciones = booleano ? [['true', 'Sí'], ['false', 'No']] : opcionesUnicas[campo];
   if (campo === 'SDR') {
     opciones = [...opcionesUnicas.SDR];
@@ -95,7 +120,30 @@ export function crearCampo(columna, indice, valor, asignaciones = {}) {
   }
   let entrada;
   let leer;
-  if (opciones) {
+  if (campo === 'ADHERENTE?') {
+    entrada = document.createElement('select');
+    for (const [clave, nombre] of opcionesAdherente) entrada.add(new Option(nombre, clave));
+    const original = claveAdherente(valor);
+    entrada.value = original ?? '';
+    if (original === undefined) {
+      const anterior = crear('p', `Valor anterior: ${valor}`);
+      anterior.className = 'ayuda';
+      contenedor.append(anterior);
+    }
+    let editado = false;
+    entrada.addEventListener('change', () => { editado = true; });
+    leer = () => !editado || entrada.value === original ? valor
+      : opcionesAdherente.find(([clave]) => clave === entrada.value)[2];
+  } else if (campo === 'RUBRO') {
+    entrada = document.createElement('select');
+    entrada.add(new Option('Sin indicar', ''));
+    for (const rubro of rubros) entrada.add(new Option(rubro, rubro));
+    const anterior = String(valor ?? '').trim();
+    const original = rubros.find(rubro => claveCampo(rubro) === claveCampo(anterior)) ?? anterior;
+    if (original && !rubros.includes(original)) entrada.add(new Option(`${original} (valor anterior)`, original));
+    entrada.value = original;
+    leer = () => entrada.value === original ? valor : entrada.value || null;
+  } else if (opciones) {
     entrada = document.createElement('select');
     const original = valor === null || valor === '' ? '' : opciones.find(([clave]) => claveOpcion(clave) === claveOpcion(valor))?.[0] ?? 'anterior';
     const alternativas = booleano || original === '' ? [['', 'Sin indicar'], ...opciones] : [...opciones];

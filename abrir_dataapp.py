@@ -15,7 +15,7 @@ from threading import Event, Thread
 from urllib.parse import parse_qs, urlsplit
 from zipfile import BadZipFile, ZipFile
 
-from almacenamiento import acceso_feria, administra, aplicar_catalogos, asignada, conectar, hash_password, inicializar, mismos_valores, nombre_normalizado, nueva_sesion, registrar, usuario_fila, usuario_sesion, verificar
+from almacenamiento import acceso_feria, administra, aplicar_catalogos, asignada, conectar, hash_password, inicializar, mismos_valores, nombre_normalizado, nueva_sesion, registrar, rubros_de_edicion, usuario_fila, usuario_sesion, verificar
 
 CARPETA = Path(__file__).resolve().parent
 PUBLICOS = {'/', '/index.html', '/app.js', '/estilos.css', '/campos.js', '/offline.js', '/dictado.js',
@@ -241,6 +241,16 @@ class DataAppHandler(SimpleHTTPRequestHandler):
                 filas = db.execute("SELECT name,assignment,COALESCE(profile,role) AS role FROM users WHERE role!='admin'").fetchall()
             return self.responder({rol: [fila['assignment'] or fila['name'] for fila in filas if fila['role'] == rol]
                                    for rol in ('consultor', 'sdr')})
+
+        if ruta == '/api/rubros' and metodo == 'GET':
+            if not administra(usuario):
+                raise ErrorApp('Solo Marketing puede consultar los rubros para editar fichas.', 403)
+            evento = parse_qs(urlsplit(self.path).query).get('event', [''])[0]
+            with conectar() as db:
+                feria = db.execute('SELECT id,columns_json FROM events WHERE id=? AND archived_at IS NULL', (evento,)).fetchone()
+                if not feria:
+                    raise ErrorApp('Elegí una edición de la feria.', 404)
+                return self.responder(rubros_de_edicion(db, feria))
 
         if metodo == 'POST' and ruta.startswith('/api/users/'):
             if not administra(usuario):

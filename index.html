@@ -50,7 +50,7 @@
         <p id="sync-estado" class="ayuda" role="status"></p>
         <div id="portada">
           <span class="etiqueta">TU AGENDA COMERCIAL</span><h1>Ferias y eventos</h1>
-          <p class="subtitulo">Elegí una feria para consultar sus empresas y registrar nuevas oportunidades.</p>
+          <p class="subtitulo">Elegí una feria y su año para consultar empresas y registrar oportunidades en esa edición.</p>
           <div id="metricas" class="metricas"></div><div id="ferias" class="ferias"></div>
           <button id="agregar-feria" class="primario" hidden>Agregar feria</button>
           <button id="ferias-archivadas" class="secundario" hidden>Ferias archivadas</button>
@@ -68,19 +68,26 @@
           </form>
           <button id="actualizar-bases" class="secundario" hidden>Actualizar desde las planillas</button>
           <p id="actualizar-estado" class="ayuda" role="status"></p>
-          <p class="ayuda">Cada feria tiene su propio catálogo e historial de actividades.</p>
+          <p class="ayuda">Cada edición tiene su propio catálogo, contactos, visitas y tareas.</p>
         </div>
         <section id="ediciones" hidden>
           <button id="volver-ferias" class="texto">← Ferias y eventos</button>
           <span class="etiqueta">EDICIONES POR AÑO</span>
           <h1 id="ediciones-titulo"></h1>
-          <p class="subtitulo">Elegí el año que querés consultar.</p>
+          <p class="subtitulo">Elegí el año que querés consultar. Los datos se guardan por separado en cada edición.</p>
           <div id="lista-ediciones" class="ferias"></div>
         </section>
         <section id="catalogo" hidden>
           <button id="volver" class="texto">← Elegir año</button>
-          <p id="edicion-actual" class="etiqueta"></p>
-          <div class="titulo-fila"><div><span class="etiqueta">CATÁLOGO DE EMPRESAS</span><h1 id="feria-titulo"></h1><p id="fuente" class="subtitulo"></p></div></div>
+          <div class="cabecera-edicion">
+            <p id="edicion-actual" class="insignia"></p>
+            <h1 id="feria-titulo"></h1><p id="fuente"></p>
+            <nav id="vistas-edicion" aria-label="Secciones de la edición">
+              <button type="button" class="secundario" data-vista="feria">Empresas</button>
+              <button type="button" class="secundario" data-vista="cartera">Mi cartera</button>
+              <button type="button" class="secundario" data-vista="pendientes">Mis pendientes</button>
+            </nav>
+          </div>
           <section id="checklist" class="panel checklist" aria-labelledby="checklist-titulo" hidden>
             <h2 id="checklist-titulo">Mi checklist</h2>
             <p class="ayuda">Agregá tus tareas, asignales fecha y hora y marcalas al terminar.</p>

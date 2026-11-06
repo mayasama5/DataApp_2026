@@ -1,4 +1,4 @@
-const CACHE = 'data-app-interfaz-v7';
+const CACHE = 'data-app-interfaz-v10';
 const INTERFAZ = ['./', './index.html', './estilos.css', './app.js', './campos.js', './offline.js', './dictado.js', './captura-voz.js', './manifest.webmanifest', './logo-dataapp-192.png', './logo-dataapp-512.png'];
 
 self.addEventListener('install', evento => {

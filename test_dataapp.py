@@ -53,6 +53,13 @@ class FlujoCRM(unittest.TestCase):
         eventos = self.api('events')[1]
         self.assertEqual({e['name']: e['count'] for e in eventos}, {'Feria San Pedro': 150, 'Expo Paraguay Brasil': 166})
         san = next(e for e in eventos if e['name'] == 'Feria San Pedro')
+        expo = next(e for e in eventos if e['name'] == 'Expo Paraguay Brasil')
+        rubros_san = 'rubros?event=' + san['id']
+        estado, rubros = self.api(rubros_san)
+        self.assertEqual(estado, 200)
+        self.assertIn('Agro / agronegocios', rubros)
+        self.assertIn('Tecnología y Software', rubros)
+        self.assertEqual(rubros.count('Comercio'), 1)
         empresas = self.api('companies?event=' + san['id'])[1]
         oro = next(e for e in empresas if e['values'][0] == 'Oro Verde')
         ruta = 'company/' + oro['id']
@@ -74,6 +81,7 @@ class FlujoCRM(unittest.TestCase):
         self.assertEqual(self.api('login', {**consultor, 'role': 'marketing'})[0], 401)
         self.assertEqual(self.api('login', consultor)[0], 200)
         self.assertEqual(self.api('users', cuenta)[0], 403)
+        self.assertEqual(self.api(rubros_san)[0], 403)
         self.assertEqual(self.api(ruta, {'kind': 'contact', 'details': {'name': 'Contacto Oro Verde', 'phone': '0981'}})[0], 200)
         self.assertEqual(self.api(ruta, {'kind': 'visit', 'details': {'status': 'REALIZADO', 'notes': 'Conversación comercial'}})[0], 200)
         detalle = self.api(ruta)[1]
@@ -248,7 +256,8 @@ class FlujoCRM(unittest.TestCase):
         libro_nuevo = Workbook()
         libro_nuevo.active.title = 'Empresas'
         libro_nuevo.active.append(san['columns'])
-        datos_nuevos = {'EMPRESA': 'Empresa de 2027', 'CONSULTOR': 'Caio', 'STATUS VISITA': 'PENDIENTE', 'ADHERENTE?': True}
+        datos_nuevos = {'EMPRESA': 'Oro Verde', 'RUBRO': 'Rubro de la nueva edición',
+                        'CONSULTOR': 'Caio', 'STATUS VISITA': 'PENDIENTE', 'ADHERENTE?': True}
         libro_nuevo.active.append([datos_nuevos.get(columna) for columna in san['columns']])
         archivo_nuevo = io.BytesIO()
         libro_nuevo.save(archivo_nuevo)
@@ -266,8 +275,32 @@ class FlujoCRM(unittest.TestCase):
             edicion_2027 = json.load(respuesta)['id']
         self.assertEqual(len(self.api('companies?event=' + san['id'])[1]), 150)
         nuevas = self.api('companies?event=' + edicion_2027)[1]
-        self.assertEqual([r['values'][0] for r in nuevas], ['Empresa de 2027'])
+        self.assertEqual([r['values'][0] for r in nuevas], ['Oro Verde'])
+        self.assertNotEqual(nuevas[0]['id'], oro['id'])
         self.assertIs(nuevas[0]['values'][san['columns'].index('ADHERENTE?')], True)
+        self.assertIn(datos_nuevos['RUBRO'], self.api('rubros?event=' + edicion_2027)[1])
+        self.assertNotIn(datos_nuevos['RUBRO'], self.api(rubros_san)[1])
+        self.assertNotIn(datos_nuevos['RUBRO'], self.api('rubros?event=' + expo['id'])[1])
+        ruta_2027 = 'company/' + nuevas[0]['id']
+        self.assertEqual(self.api(ruta_2027)[1]['activities'], [])
+        self.assertEqual(self.api(ruta_2027, {'kind': 'contact', 'details': {'name': 'Contacto exclusivo 2027'}})[0], 200)
+        self.assertNotIn('Contacto exclusivo 2027', json.dumps(self.api(ruta)[1]['activities']))
+        self.assertNotIn('Contacto exclusivo 2027', json.dumps(self.api('companies?event=' + expo['id'])[1]))
+
+        exportado = load_workbook(io.BytesIO(exportar(edicion_2027)))
+        self.assertIn('Contacto exclusivo 2027', [fila[1] for fila in exportado['Contactos DataApp'].values])
+        exportado.active.delete_cols(exportado.active.max_column)
+        exportado.active.title = san['sheet']
+        sin_columna_id = io.BytesIO()
+        exportado.save(sin_columna_id)
+        exportado.close()
+        solicitud_cruzada = urllib.request.Request(self.url + '/api/import?event=' + san['id'],
+                                                   data=sin_columna_id.getvalue(), headers=cabeceras)
+        with self.assertRaises(urllib.error.HTTPError) as cruzada:
+            self.cliente.open(solicitud_cruzada)
+        self.assertEqual(cruzada.exception.code, 400)
+        self.assertIn('otra feria', json.load(cruzada.exception)['error'])
+        self.assertEqual(self.api(ruta)[1]['values'], valores_excel)
         self.assertEqual(self.api('events', {**meta, 'year': 2027})[0], 409)
         tarea_2027 = {'userId': self.api('me')[1]['user']['id'], 'operationId': str(uuid.uuid4()),
                       'changes': [{**tarea, 'id': str(uuid.uuid4())}]}

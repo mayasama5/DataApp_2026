@@ -13,6 +13,13 @@ from pathlib import Path
 
 BASE = Path(os.environ.get('DATAAPP_DB', Path(__file__).with_name('dataapp.sqlite3')))
 ADHERENTE = 'ADHERENTE?'
+RUBROS_COMUNES = (
+    'Agro / agronegocios', 'Agro e Industria Alimentaria', 'Automotores / maquinarias', 'Banco',
+    'Comercio', 'Comercio / Agro', 'Comercio Exterior y Logística', 'Construcción e Inmobiliario',
+    'Consultoría y Servicios', 'Cooperativa', 'Distribuidora / Insumos', 'Fábrica', 'Financiero y Bancario',
+    'Industria y Manufactura', 'Instituciones y Organismos', 'Otros sectores', 'Prensa',
+    'Stand sin asignación', 'Tecnología', 'Tecnología y Software',
+)
 
 
 def completar_adherente(evento):
@@ -176,6 +183,20 @@ def usuario_fila(fila):
 def nombre_normalizado(valor):
     sin_acentos = ''.join(c for c in unicodedata.normalize('NFD', str(valor or '')) if not unicodedata.combining(c))
     return ' '.join(sin_acentos.casefold().split())
+
+
+def rubros_de_edicion(db, feria):
+    rubros = {nombre_normalizado(rubro): rubro for rubro in RUBROS_COMUNES}
+    columnas = json.loads(feria['columns_json'])
+    indice = next((i for i, columna in enumerate(columnas) if nombre_normalizado(columna) == 'rubro'), None)
+    if indice is not None:
+        filas = db.execute('SELECT source_json FROM companies WHERE event_id=? ORDER BY source_row, id', (feria['id'],))
+        for fila in filas:
+            rubro = json.loads(fila['source_json'])[indice]
+            if isinstance(rubro, str) and rubro.strip():
+                etiqueta = ' '.join(rubro.split())
+                rubros.setdefault(nombre_normalizado(etiqueta), etiqueta)
+    return [rubros[clave] for clave in sorted(rubros)]
 
 
 def administra(usuario):

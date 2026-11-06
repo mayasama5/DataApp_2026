@@ -1,4 +1,4 @@
-import { camposContacto, claveCampo, crearCampo } from './campos.js';
+import { camposContacto, claveCampo, crearCampo, mostrarAdherente, tituloCampo } from './campos.js';
 import { guardarCache, guardarPendiente, iniciarModoOffline, leerCache, pendientesDe, quitarPendiente } from './offline.js';
 import { controlDictado, detenerDictado } from './dictado.js';
 
@@ -223,8 +223,8 @@ function pantalla(id) {
   paginaActual = id;
   numeroVista++;
   for (const opcion of ['portada', 'ediciones', 'catalogo', 'equipo', 'auditoria']) $(`#${opcion}`).hidden = opcion !== id;
-  $('#cartera').hidden = !eventoActual;
-  $('#pendientes').hidden = !eventoActual;
+  $('#cartera').hidden = id !== 'catalogo';
+  $('#pendientes').hidden = id !== 'catalogo';
   const seleccionado = {
     portada: 'inicio', ediciones: 'inicio', catalogo: vistaCatalogo === 'feria' ? 'inicio' : vistaCatalogo,
     equipo: 'usuarios', auditoria: 'registro-actividad',
@@ -232,6 +232,10 @@ function pantalla(id) {
   for (const nav of document.querySelectorAll('.lateral .nav')) {
     if (nav.id === seleccionado) nav.setAttribute('aria-current', 'page');
     else nav.removeAttribute('aria-current');
+  }
+  for (const boton of document.querySelectorAll('#vistas-edicion [data-vista]')) {
+    if (id === 'catalogo' && boton.dataset.vista === vistaCatalogo) boton.setAttribute('aria-current', 'page');
+    else boton.removeAttribute('aria-current');
   }
   $('#mensaje').textContent = '';
 }
@@ -274,8 +278,13 @@ function mostrarPortada() {
     $('#metricas').append(tarjeta);
   }
   for (const nombre of nombres) {
+    const anios = eventos.filter(feria => claveFeria(feria.name) === claveFeria(nombre) && feria.accessible)
+      .map(feria => feria.year).sort((a, b) => b - a);
     const tarjeta = texto('button', '', `feria ${claveFeria(nombre).includes('san pedro') ? 'verde' : 'azul'}`);
+    const ediciones = texto('span', '', 'ediciones-feria');
+    for (const anio of anios) ediciones.append(texto('span', anio, 'insignia'));
     tarjeta.append(texto('span', 'FERIA COMERCIAL', 'etiqueta'), texto('h2', nombre),
+      ediciones,
       texto('span', 'Ver ediciones →', 'explorar'));
     tarjeta.addEventListener('click', () => mostrarEdiciones(nombre));
     $('#ferias').append(tarjeta);
@@ -296,15 +305,15 @@ function mostrarEdiciones(nombre) {
   eventoActual = null;
   feriaSeleccionada = nombre;
   const ediciones = eventos.filter(feria => claveFeria(feria.name) === claveFeria(nombre));
-  const anios = [...new Set([2026, 2027, ...ediciones.map(feria => feria.year)])].sort();
+  const anios = [...new Set([2026, 2027, ...ediciones.map(feria => feria.year)])].sort((a, b) => a - b);
   $('#ediciones-titulo').textContent = nombre;
   $('#lista-ediciones').replaceChildren();
   for (const anio of anios) {
     const feria = ediciones.find(edicion => edicion.year === anio);
     const tarjeta = texto('article', '', 'panel edicion');
-    tarjeta.append(texto('h2', anio));
+    tarjeta.append(texto('span', 'EDICIÓN', 'etiqueta'), texto('h2', anio));
     if (feria?.accessible) {
-      tarjeta.append(texto('p', `${feria.count} registros`, 'ayuda'));
+      tarjeta.append(texto('p', `${feria.count} ${feria.count === 1 ? 'empresa' : 'empresas'} en el catálogo`, 'ayuda'));
       const abrir = texto('button', `Abrir ${anio}`, 'primario');
       abrir.addEventListener('click', () => abrirEvento(feria).catch(error => { $('#mensaje').textContent = error.message; }));
       tarjeta.append(abrir);
@@ -365,6 +374,12 @@ $('#usuarios').addEventListener('click', () => {
 for (const [id, vista] of [['cartera', 'cartera'], ['pendientes', 'pendientes']]) {
   $(`#${id}`).addEventListener('click', () => abrirCartera(vista).catch(error => { $('#mensaje').textContent = error.message; }));
 }
+$('#vistas-edicion').addEventListener('click', evento => {
+  const vista = evento.target.closest('[data-vista]')?.dataset.vista;
+  if (!eventoActual || !vista || vista === vistaCatalogo) return;
+  const abrir = vista === 'feria' ? abrirEvento(eventoActual) : abrirCartera(vista);
+  abrir.catch(error => { $('#mensaje').textContent = error.message; });
+});
 
 function prepararFeria(nombre = '', anio = 2026) {
   abrirInicio();
@@ -568,7 +583,10 @@ function contactosParaBuscar(actividades) {
 }
 
 async function abrirEvento(evento) {
-  empresas = await cargarEmpresas(evento);
+  const vista = ++numeroVista;
+  const registros = await cargarEmpresas(evento);
+  if (!usuario || vista !== numeroVista) return;
+  empresas = registros;
   eventoActual = evento;
   feriaSeleccionada = evento.name;
   vistaCatalogo = 'feria';
@@ -588,13 +606,21 @@ async function abrirEvento(evento) {
   pantalla('catalogo');
   listar();
   await estadoConexion();
+  if (!sinConexion && usuario && eventoActual?.id === evento.id) {
+    const cuenta = usuario;
+    const consulta = `event=${encodeURIComponent(evento.id)}`;
+    const rutas = [`tasks?${consulta}`];
+    if (esMarketing()) rutas.push(`rubros?${consulta}`);
+    for (const ruta of rutas) api(ruta).then(datos => guardarCache(rutaCache(ruta, cuenta), datos)).catch(() => {});
+  }
 }
 
 async function abrirCartera(vista) {
   const feria = eventoActual;
   if (!feria) return;
+  const solicitud = ++numeroVista;
   const registros = await cargarEmpresas(feria);
-  if (eventoActual?.id !== feria.id) return;
+  if (!usuario || solicitud !== numeroVista || eventoActual?.id !== feria.id) return;
   empresas = registros.filter(empresa => esMarketing() || empresa.assigned);
   vistaCatalogo = vista;
   $('#edicion-actual').textContent = `${feria.name} · ${feria.year}`;
@@ -608,10 +634,16 @@ async function abrirCartera(vista) {
   $('#renombrar-feria').hidden = true;
   $('#checklist').hidden = vista !== 'pendientes';
   $('#visitas-pendientes-titulo').hidden = vista !== 'pendientes';
+  if (vista === 'pendientes') {
+    restablecerTarea();
+    $('#lista-tareas').replaceChildren(texto('p', 'Cargando las tareas de esta edición…', 'ayuda'));
+    $('#tareas-anteriores').hidden = true;
+    $('#lista-tareas-anteriores').replaceChildren();
+    $('#tareas-estado').textContent = '';
+  }
   pantalla('catalogo');
   listar();
   if (vista === 'pendientes') {
-    restablecerTarea();
     await cargarTareas().catch(error => { $('#tareas-estado').textContent = error.message; });
   }
   await estadoConexion();
@@ -683,7 +715,7 @@ async function cargarTareas() {
   const ruta = `tasks?event=${encodeURIComponent(edicion)}`;
   const [guardadas, anteriores] = await Promise.all([consultar(ruta, []), consultar('tasks', [])]);
   const pendientes = await pendientesDe(cuenta).catch(() => []);
-  if (usuario?.id !== cuenta || eventoActual?.id !== edicion) return;
+  if (usuario?.id !== cuenta || eventoActual?.id !== edicion || paginaActual !== 'catalogo' || vistaCatalogo !== 'pendientes') return;
   const tareas = new Map(guardadas.map(tarea => [tarea.id, tarea]));
   const antiguas = new Map(anteriores.map(tarea => [tarea.id, tarea]));
   for (const op of pendientes.filter(operacion => operacion.ruta === ruta || operacion.ruta === 'tasks')) {
@@ -799,12 +831,18 @@ $('#importar').addEventListener('change', async evento => {
   const archivo = entrada.files[0];
   if (!archivo) return;
   const feria = eventoActual;
+  if (!feria || !window.confirm(`¿Importar «${archivo.name}» en ${feria.name} · ${feria.year}?`)) {
+    entrada.value = '';
+    return;
+  }
+  const vista = numeroVista;
   entrada.disabled = true;
   $('#estado-excel').textContent = 'Importando la planilla…';
   try {
     const datos = await enviarExcel('import', { event: feria.id }, archivo);
-    if (eventoActual.id === feria.id) {
+    if (eventoActual?.id === feria.id && vista === numeroVista) {
       eventos = await consultar('events');
+      if (vista !== numeroVista) return;
       await abrirEvento(eventos.find(evento => evento.id === feria.id));
       $('#estado-excel').textContent = `Importación completada. ${datos.conflicts} ficha(s) para revisión.`;
     }
@@ -929,8 +967,8 @@ function mostrarFicha() {
   columnasDeFicha(eventoActual.columns).forEach(({ columna, indice }) => {
     if (camposContacto.includes(claveCampo(columna))) return;
     const par = texto('div', '', /OBSERVACIONES/.test(claveCampo(columna)) ? 'resumen-ancho' : '');
-    const titulo = claveCampo(columna) === 'ADHERENTE?' ? 'Adherente / parcería' : columna.trim();
-    par.append(texto('dt', titulo), texto('dd', mostrar(detalleActual.values[indice])));
+    const mostrarValor = claveCampo(columna) === 'ADHERENTE?' ? mostrarAdherente : mostrar;
+    par.append(texto('dt', tituloCampo(columna)), texto('dd', mostrarValor(detalleActual.values[indice])));
     datos.append(par);
   });
   $('#resumen-estado').textContent = `Estado de visita · ${mostrar(valorCampo(empresaActual, 'STATUS VISITA'))}`;
@@ -1021,9 +1059,14 @@ async function eliminarRegistro(config, registro, boton) {
 }
 
 async function abrirFicha(empresa, registrarConsulta = true) {
-  eventoActual = empresa.feria;
-  const base = await consultar(`company/${empresa.id}`, { values: empresa.values, version: empresa.version, activities: [] }, registrarConsulta);
+  const vista = ++numeroVista;
+  const [base, rubros] = await Promise.all([
+    consultar(`company/${empresa.id}`, { values: empresa.values, version: empresa.version, activities: [] }, registrarConsulta),
+    esMarketing() ? consultar(`rubros?event=${encodeURIComponent(empresa.feria.id)}`, []) : [],
+  ]);
+  if (!usuario || vista !== numeroVista || eventoActual?.id !== empresa.feria.id) return;
   const pendientes = await pendientesDe(usuario.id).catch(() => []);
+  if (!usuario || vista !== numeroVista) return;
   const detalle = proyectar(base, pendientes.filter(op => op.empresaId === empresa.id));
   empresaActual = empresa;
   detalleActual = detalle;
@@ -1035,7 +1078,7 @@ async function abrirFicha(empresa, registrarConsulta = true) {
     empresa.contactsSearch = `${empresa.contactsSearch || ''} ${contactosParaBuscar(detalle.activities)}`;
   }
   $('#empresa-nombre').textContent = mostrar(detalle.values[0]);
-  $('#ficha-feria').textContent = eventoActual.name;
+  $('#ficha-feria').textContent = `${eventoActual.name} · ${eventoActual.year}`;
   $('#ficha-origen').textContent = `${eventoActual.source} · ${eventoActual.sheet} · fila ${empresa.row}`;
   $('#ficha-mensaje').textContent = detalle.importConflict ? 'La planilla cambió y esta ficha tiene ediciones. Se conservaron tus cambios. La actualización requiere revisión.' : '';
   $('#tab-datos').hidden = !esMarketing();
@@ -1044,7 +1087,7 @@ async function abrirFicha(empresa, registrarConsulta = true) {
   columnasDeFicha(eventoActual.columns).forEach(({ columna, indice }) => {
     if (camposContacto.includes(claveCampo(columna))) return;
     if (!esMarketing()) return;
-    const { nodo, leer } = crearCampo(columna, indice, detalle.values[indice], nombresAsignacion);
+    const { nodo, leer } = crearCampo(columna, indice, detalle.values[indice], nombresAsignacion, rubros);
     const observaciones = nodo.querySelector('textarea');
     if (claveCampo(columna) === 'OBSERVACIONES' && observaciones) nodo.append(controlDictado(observaciones));
     lectoresFicha.set(indice, leer);

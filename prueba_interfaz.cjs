@@ -34,6 +34,8 @@ async function probar() {
       await page.getByRole('button', { name: `Abrir ${anio}`, exact: true }).click();
       await page.locator('#cartera').waitFor();
       await page.locator('#pendientes').waitFor();
+      assert.equal(await page.locator('#edicion-actual').innerText(), `${nombre} · ${anio}`);
+      assert.equal(await page.locator('#vistas-edicion [aria-current="page"]').innerText(), 'Empresas');
     }
     await page.addInitScript(() => {
       window.SpeechRecognition = class {
@@ -86,9 +88,18 @@ async function probar() {
       }, null, { timeout: 25000 });
     }
     assert.equal(await page.locator('#campos > .campo').count(), 24);
-    const adherente = page.getByLabel('Adherente / parcería', { exact: true });
+    const adherente = page.getByLabel('Adherente', { exact: true });
     assert.equal(await adherente.inputValue(), '');
-    await adherente.selectOption('true');
+    assert.deepEqual(await adherente.locator('option').allTextContents(), ['Sin indicar', 'Sí', 'No', 'Parcería']);
+    await adherente.selectOption({ label: 'Parcería' });
+    const rubro = page.getByRole('combobox', { name: 'Rubro', exact: true });
+    const rubrosDisponibles = await rubro.locator('option').allTextContents();
+    assert.equal(rubrosDisponibles.length, 21);
+    assert.ok(rubrosDisponibles.includes('Agro / agronegocios'));
+    assert.ok(rubrosDisponibles.includes('Industria y Manufactura'));
+    assert.ok(rubrosDisponibles.includes('Tecnología y Software'));
+    assert.equal(rubrosDisponibles.filter(valor => valor === 'Comercio').length, 1);
+    await rubro.selectOption({ label: 'Tecnología y Software' });
     const consultores = page.getByRole('group', { name: 'CONSULTOR', exact: true });
     for (const casilla of await consultores.getByRole('checkbox').all()) {
       if (await casilla.isChecked()) await casilla.uncheck();
@@ -105,7 +116,10 @@ async function probar() {
     await page.getByRole('button', { name: 'Guardar cambios', exact: true }).click();
     await page.getByText('Cambios guardados. Tu nombre y la fecha quedaron en el historial.').waitFor();
     assert.match(await page.locator('#resumen-datos').innerText(), /Seguimiento comercial de prueba/);
+    await page.locator('#resumen-datos').getByText('Parcería', { exact: true }).waitFor();
     await page.locator('#abrir-edicion').click();
+    assert.equal(await adherente.inputValue(), 'parceria');
+    assert.equal(await rubro.inputValue(), 'Tecnología y Software');
     assert.equal(await consultores.getByLabel('Sofía', { exact: true }).isChecked(), true);
     assert.equal(await page.getByLabel('FECHA', { exact: true }).inputValue(), '2026-11-05');
     await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
@@ -157,6 +171,7 @@ async function probar() {
     assert.equal(archivo.suggestedFilename(), 'san-pedro-2026.xlsx');
     const rutaExcel = path.join(temporal, archivo.suggestedFilename());
     await archivo.saveAs(rutaExcel);
+    page.once('dialog', dialogo => dialogo.accept());
     await page.locator('#importar').setInputFiles(rutaExcel);
     await page.getByText(/Importación completada/).waitFor();
     await page.locator('#inicio').click();
@@ -164,20 +179,24 @@ async function probar() {
     await page.waitForFunction(() => document.querySelectorAll('#empresas tr').length === 166);
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.locator('#buscar').fill('Lucía Nuevo Contacto');
+    assert.equal(await page.locator('#empresas button').count(), 0);
+    await page.locator('#buscar').fill('');
     await page.locator('#empresas button').first().click();
     await page.locator('#ficha-resumen').waitFor();
     await page.locator('#abrir-edicion').click();
     await page.locator('#campo-0').waitFor();
     assert.equal(await page.locator('#campos > .campo').count(), 23);
+    assert.deepEqual(await rubro.locator('option').allTextContents(), rubrosDisponibles);
     if (process.env.DATAAPP_CAPTURAS) await page.screenshot({ path: path.join(process.env.DATAAPP_CAPTURAS, 'data-app-movil.png') });
     await page.locator('#cerrar').click();
     await page.locator('#inicio').click();
     await abrirEdicion('Feria San Pedro');
-    await page.locator('#pendientes').click();
+    await page.locator('#vistas-edicion [data-vista="pendientes"]').click();
     await page.getByRole('heading', { name: 'Mis pendientes', exact: true }).waitFor();
     await page.locator('#buscar').fill('Oro Verde');
     assert.equal(await page.getByRole('button', { name: 'Abrir ficha de Oro Verde', exact: true }).count(), 0);
-    await page.locator('#cartera').click();
+    await page.locator('#vistas-edicion [data-vista="cartera"]').click();
     await page.getByRole('heading', { name: 'Mi cartera', exact: true }).waitFor();
     await page.locator('#buscar').fill('Oro Verde');
     await page.getByRole('button', { name: 'Abrir ficha de Oro Verde', exact: true }).waitFor();
@@ -255,6 +274,9 @@ async function probar() {
     assert.equal(await page.locator('#auditoria-lista').getByText('Contacto agregado', { exact: true }).count(), 2);
     await page.locator('#auditoria-lista').getByText('Contacto eliminado', { exact: true }).waitFor();
     assert.doesNotMatch(await page.locator('#auditoria-lista').innerText(), /María Consultora/);
+    assert.equal(await page.locator('#pendientes').isHidden(), true);
+    await page.locator('#inicio').click();
+    await abrirEdicion('Feria San Pedro');
     await page.locator('#pendientes').click();
     await page.getByRole('heading', { name: 'Mi checklist', exact: true }).waitFor();
     await page.locator('#tarea-titulo').fill('Confirmar reunión de prueba');
