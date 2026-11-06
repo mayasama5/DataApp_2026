@@ -2,14 +2,15 @@
 <html lang="es">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Data App · CRM de ferias</title>
+  <title>DataApp · CRM de ferias</title>
   <link rel="stylesheet" href="estilos.css"><link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="logo-dataapp-192.png"><link rel="apple-touch-icon" href="logo-dataapp-192.png">
   <meta name="theme-color" content="#064c3c"><script type="module" src="app.js"></script>
 </head>
 <body>
   <section id="acceso" class="acceso" hidden>
     <div class="presentacion">
-      <div class="marca"><span class="simbolo">D</span>Data App</div>
+      <div class="marca"><img class="simbolo" src="logo-dataapp-192.png" alt="">DataApp</div>
       <span class="etiqueta">DATAPAR · CONEXIONES QUE CRECEN</span>
       <h1>Cada encuentro,<br>una oportunidad.</h1>
       <p>Tu equipo, tus ferias y tus relaciones comerciales en un mismo lugar.</p>
@@ -17,7 +18,7 @@
       <small>CRM de ferias y eventos · Paraguay</small>
     </div>
     <div class="acceso-form">
-      <span class="etiqueta">BIENVENIDA A DATA APP</span>
+      <span class="etiqueta">BIENVENIDA A DataApp</span>
       <h2 id="acceso-titulo">Ingresá a tu espacio</h2>
       <p id="acceso-texto">Consultá tus ferias y continuá donde lo dejaste.</p>
       <form id="login">
@@ -25,19 +26,19 @@
         <label for="email">Correo electrónico</label><input id="email" name="email" type="email" autocomplete="username" required maxlength="200" placeholder="nombre@datapar.com.py">
         <div id="rol-ingreso" hidden><label for="login-rol">Rol</label><select id="login-rol" name="role" required disabled><option value="">Elegí tu rol</option><option value="consultor">Consultor de ventas</option><option value="sdr">SDR</option><option value="marketing">Marketing</option></select></div>
         <label for="password">Contraseña</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="200">
-        <button class="primario" id="ingresar">Ingresar a Data App →</button>
+        <button class="primario" id="ingresar">Ingresar a DataApp →</button>
       </form>
       <p id="error-login" role="alert"></p>
-      <p class="ayuda">Tus datos se guardan en esta computadora. Para usar la aplicación, mantené Data App iniciada.</p>
+      <p class="ayuda">Tus datos se guardan en esta computadora. Para usar la aplicación, mantené DataApp iniciada.</p>
     </div>
   </section>
   <div id="aplicacion" class="aplicacion" hidden>
     <aside class="lateral">
-      <div class="marca"><span class="simbolo">D</span>Data App</div>
+      <div class="marca"><img class="simbolo" src="logo-dataapp-192.png" alt="">DataApp</div>
       <small class="etiqueta">ESPACIO COMERCIAL</small>
-      <button id="inicio" class="nav activo">◈ &nbsp; Ferias y eventos</button>
-      <button id="cartera" class="nav">▤ &nbsp; Mi cartera</button>
-      <button id="pendientes" class="nav">◷ &nbsp; Mis pendientes</button>
+      <button id="inicio" class="nav" aria-current="page">◈ &nbsp; Ferias y eventos</button>
+      <button id="cartera" class="nav" hidden>▤ &nbsp; Mi cartera</button>
+      <button id="pendientes" class="nav" hidden>◷ &nbsp; Mis pendientes</button>
       <button id="registro-actividad" class="nav">▣ &nbsp; Registro de actividad</button>
       <button id="usuarios" class="nav" hidden>＋ &nbsp; Usuarios del equipo</button>
       <div class="lateral-pie"><span class="avatar" id="iniciales"></span><strong id="usuario"></strong><small id="rol"></small><button id="salir" class="nav">Cerrar sesión</button></div>
@@ -57,8 +58,10 @@
           <form id="nueva-feria" class="panel formulario-equipo" hidden>
             <h2>Nueva feria</h2>
             <label for="feria-nombre-nueva">Nombre de la feria</label><input id="feria-nombre-nueva" name="name" required maxlength="120">
+            <label for="feria-anio-nueva">Año de la edición</label><input id="feria-anio-nueva" name="year" type="number" min="2000" max="2100" value="2026" required>
             <label for="feria-pestana">Nombre de la pestaña en Excel</label><input id="feria-pestana" name="sheet" placeholder="Empresas" maxlength="31">
-            <p class="ayuda">Después de crearla podés importar un Excel o descargar la plantilla desde la feria.</p>
+            <label for="feria-excel-nuevo">Importar datos desde Excel (opcional)</label><input id="feria-excel-nuevo" type="file" accept=".xlsx">
+            <p class="ayuda">Si ya tenés la planilla, subila al crear la edición. También podés importarla más adelante.</p>
             <button class="primario">Crear feria</button>
             <button id="cancelar-feria" class="secundario" type="button">Cancelar</button>
             <p id="nueva-feria-estado" role="status"></p>
@@ -67,9 +70,44 @@
           <p id="actualizar-estado" class="ayuda" role="status"></p>
           <p class="ayuda">Cada feria tiene su propio catálogo e historial de actividades.</p>
         </div>
+        <section id="ediciones" hidden>
+          <button id="volver-ferias" class="texto">← Ferias y eventos</button>
+          <span class="etiqueta">EDICIONES POR AÑO</span>
+          <h1 id="ediciones-titulo"></h1>
+          <p class="subtitulo">Elegí el año que querés consultar.</p>
+          <div id="lista-ediciones" class="ferias"></div>
+        </section>
         <section id="catalogo" hidden>
-          <button id="volver" class="texto">← Todas las ferias</button>
+          <button id="volver" class="texto">← Elegir año</button>
+          <p id="edicion-actual" class="etiqueta"></p>
           <div class="titulo-fila"><div><span class="etiqueta">CATÁLOGO DE EMPRESAS</span><h1 id="feria-titulo"></h1><p id="fuente" class="subtitulo"></p></div></div>
+          <section id="checklist" class="panel checklist" aria-labelledby="checklist-titulo" hidden>
+            <h2 id="checklist-titulo">Mi checklist</h2>
+            <p class="ayuda">Agregá tus tareas, asignales fecha y hora y marcalas al terminar.</p>
+            <form id="tarea-form">
+              <div class="tarea-campos">
+                <div class="tarea-nombre"><label for="tarea-titulo">Tarea</label><input id="tarea-titulo" name="title" required maxlength="200" placeholder="Ej. Confirmar horario de visita"></div>
+                <div><label for="tarea-fecha">Fecha prevista</label><input id="tarea-fecha" name="date" type="date"></div>
+                <div><label for="tarea-hora">Hora prevista</label><input id="tarea-hora" name="time" type="time"></div>
+              </div>
+              <button id="tarea-guardar" class="primario">Agregar tarea</button>
+              <button id="tarea-cancelar" class="secundario" type="button" hidden>Cancelar edición</button>
+            </form>
+            <div class="tarea-plantilla">
+              <div><label for="tarea-plantilla">Checklist predeterminado</label>
+                <select id="tarea-plantilla"><option value="visita">Preparar una visita</option><option value="seguimiento">Hacer seguimiento comercial</option></select>
+              </div>
+              <button id="tarea-agregar-plantilla" class="secundario" type="button">Agregar checklist</button>
+            </div>
+            <p id="tareas-estado" role="status"></p>
+            <div id="lista-tareas"></div>
+            <section id="tareas-anteriores" hidden>
+              <h3>Tareas anteriores sin edición</h3>
+              <p class="ayuda">Podés incorporar una tarea anterior a esta edición.</p>
+              <div id="lista-tareas-anteriores"></div>
+            </section>
+          </section>
+          <h2 id="visitas-pendientes-titulo" hidden>Visitas pendientes</h2>
           <div class="busqueda"><label for="buscar">Buscar empresas</label><input id="buscar" type="search" placeholder="Empresa, contacto, teléfono, consultor, stand…"><p id="cantidad" role="status"></p></div>
           <div class="acciones-excel">
             <a id="exportar" class="secundario">Exportar Excel</a>
@@ -145,6 +183,6 @@
       </form>
     </div>
   </dialog>
-  <p id="cargando" class="cargando" role="status">Abriendo Data App…</p>
+  <p id="cargando" class="cargando" role="status">Abriendo DataApp…</p>
 </body>
 </html>

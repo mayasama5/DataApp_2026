@@ -26,6 +26,15 @@ async function probar() {
   try {
     const contexto = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await contexto.newPage();
+    async function abrirEdicion(nombre, anio = 2026) {
+      await page.locator('#ferias button').filter({ hasText: nombre }).click();
+      assert.equal(await page.locator('#cartera').isHidden(), true);
+      assert.equal(await page.locator('#pendientes').isHidden(), true);
+      await page.getByRole('heading', { name: '2027', exact: true }).waitFor();
+      await page.getByRole('button', { name: `Abrir ${anio}`, exact: true }).click();
+      await page.locator('#cartera').waitFor();
+      await page.locator('#pendientes').waitFor();
+    }
     await page.addInitScript(() => {
       window.SpeechRecognition = class {
         start() {
@@ -41,6 +50,8 @@ async function probar() {
     page.on('pageerror', error => errores.push(error.message));
     await page.goto(`http://127.0.0.1:${puerto}/`);
     await page.getByRole('heading', { name: 'Creá tu cuenta administradora' }).waitFor();
+    await page.waitForFunction(() => document.querySelector('.presentacion .marca img').naturalWidth === 192);
+    assert.match(await page.title(), /^DataApp /);
     if (process.env.DATAAPP_CAPTURAS) await page.screenshot({ path: path.join(process.env.DATAAPP_CAPTURAS, 'data-app-ingreso.png'), fullPage: true });
     await page.locator('#nombre-usuario').fill('María Consultora');
     await page.locator('#email').fill('maria@prueba.test');
@@ -49,9 +60,10 @@ async function probar() {
     await page.locator('#ferias button').first().waitFor();
     assert.equal(await page.locator('#ferias button').count(), 2);
     await page.locator('#actualizar-bases').click();
-    await page.getByText('Bases actualizadas desde las planillas. Los contactos, las visitas y las ediciones de Data App se conservaron.').waitFor();
+    await page.getByText('Bases actualizadas desde las planillas. Los contactos, las visitas y las ediciones de DataApp se conservaron.').waitFor();
     if (process.env.DATAAPP_CAPTURAS) await page.screenshot({ path: path.join(process.env.DATAAPP_CAPTURAS, 'data-app-ferias.png'), fullPage: true });
-    await page.locator('#ferias button').filter({ hasText: 'Feria San Pedro' }).click();
+    assert.equal(await page.locator('#cartera').isHidden(), true);
+    await abrirEdicion('Feria San Pedro');
     await page.waitForFunction(() => document.querySelectorAll('#empresas tr').length === 150);
     await page.locator('#buscar').fill('Oro Verde');
     assert.equal(await page.locator('#empresas button').count(), 1);
@@ -73,7 +85,10 @@ async function probar() {
         return campo?.value.includes('visita fue realizada');
       }, null, { timeout: 25000 });
     }
-    assert.equal(await page.locator('#campos > .campo').count(), 23);
+    assert.equal(await page.locator('#campos > .campo').count(), 24);
+    const adherente = page.getByLabel('Adherente / parcería', { exact: true });
+    assert.equal(await adherente.inputValue(), '');
+    await adherente.selectOption('true');
     const consultores = page.getByRole('group', { name: 'CONSULTOR', exact: true });
     for (const casilla of await consultores.getByRole('checkbox').all()) {
       if (await casilla.isChecked()) await casilla.uncheck();
@@ -115,7 +130,7 @@ async function probar() {
     assert.equal(await page.locator('#empresas button').count(), 1);
     await page.reload();
     await page.locator('#ferias button').first().waitFor();
-    await page.locator('#ferias button').filter({ hasText: 'Feria San Pedro' }).click();
+    await abrirEdicion('Feria San Pedro');
     await page.locator('#buscar').fill('Oro Verde');
     await page.getByRole('button', { name: 'Abrir ficha de Oro Verde', exact: true }).click();
     await page.locator('#ficha-resumen').waitFor();
@@ -144,8 +159,8 @@ async function probar() {
     await archivo.saveAs(rutaExcel);
     await page.locator('#importar').setInputFiles(rutaExcel);
     await page.getByText(/Importación completada/).waitFor();
-    await page.locator('#volver').click();
-    await page.locator('#ferias button').filter({ hasText: 'Expo Paraguay Brasil' }).click();
+    await page.locator('#inicio').click();
+    await abrirEdicion('Expo Paraguay Brasil');
     await page.waitForFunction(() => document.querySelectorAll('#empresas tr').length === 166);
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -156,6 +171,8 @@ async function probar() {
     assert.equal(await page.locator('#campos > .campo').count(), 23);
     if (process.env.DATAAPP_CAPTURAS) await page.screenshot({ path: path.join(process.env.DATAAPP_CAPTURAS, 'data-app-movil.png') });
     await page.locator('#cerrar').click();
+    await page.locator('#inicio').click();
+    await abrirEdicion('Feria San Pedro');
     await page.locator('#pendientes').click();
     await page.getByRole('heading', { name: 'Mis pendientes', exact: true }).waitFor();
     await page.locator('#buscar').fill('Oro Verde');
@@ -195,7 +212,7 @@ async function probar() {
     await page.locator('#password').fill('Prueba-Sandra-2026');
     await page.locator('#ingresar').click();
     await page.locator('#ferias button').first().waitFor();
-    await page.locator('#ferias button').filter({ hasText: 'Feria San Pedro' }).click();
+    await abrirEdicion('Feria San Pedro');
     await page.waitForFunction(() => document.querySelectorAll('#empresas tr').length === 150);
     assert.equal(await page.locator('#exportar').isHidden(), true);
     await page.locator('#cartera').click();
@@ -238,6 +255,47 @@ async function probar() {
     assert.equal(await page.locator('#auditoria-lista').getByText('Contacto agregado', { exact: true }).count(), 2);
     await page.locator('#auditoria-lista').getByText('Contacto eliminado', { exact: true }).waitFor();
     assert.doesNotMatch(await page.locator('#auditoria-lista').innerText(), /María Consultora/);
+    await page.locator('#pendientes').click();
+    await page.getByRole('heading', { name: 'Mi checklist', exact: true }).waitFor();
+    await page.locator('#tarea-titulo').fill('Confirmar reunión de prueba');
+    await page.locator('#tarea-fecha').fill('2026-11-06');
+    await page.locator('#tarea-hora').fill('14:30');
+    await page.getByRole('button', { name: 'Agregar tarea', exact: true }).click();
+    const tarea = page.getByRole('checkbox', { name: 'Confirmar reunión de prueba', exact: true });
+    await tarea.waitFor();
+    await contexto.setOffline(true);
+    await tarea.check();
+    await page.getByText('Cambio guardado en este dispositivo. Pendiente de sincronización.', { exact: true }).waitFor();
+    await contexto.setOffline(false);
+    await page.getByText('Con conexión', { exact: true }).waitFor();
+    assert.equal(await tarea.isChecked(), true);
+    await page.getByRole('button', { name: 'Agregar checklist', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Preparar el material de la visita', exact: true }).waitFor();
+    assert.equal(await page.locator('#lista-tareas input[type="checkbox"]').count(), 4);
+    await page.locator('#cartera').click();
+    await page.getByRole('heading', { name: 'Mi cartera', exact: true }).waitFor();
+    await page.locator('#buscar').fill('Oro Verde');
+    await page.getByRole('button', { name: 'Abrir ficha de Oro Verde', exact: true }).waitFor();
+    const direccion = `http://127.0.0.1:${puerto}`;
+    const marketing = await browser.newContext();
+    try {
+      const headers = { Origin: direccion };
+      const login = await marketing.request.post(`${direccion}/api/login`, {
+        headers, data: { email: 'maria@prueba.test', password: 'Prueba-DataApp-2026', role: 'marketing' },
+      });
+      assert.equal(login.ok(), true);
+      const eventos = await (await marketing.request.get(`${direccion}/api/events`)).json();
+      const sanPedro = eventos.find(feria => feria.id === 'san-pedro-2026');
+      const empresas = await (await marketing.request.get(`${direccion}/api/companies?event=${sanPedro.id}`)).json();
+      const oro = empresas.find(empresa => empresa.values[0] === 'Oro Verde');
+      const index = sanPedro.columns.indexOf('CONSULTOR');
+      const cambio = await marketing.request.post(`${direccion}/api/company/${oro.id}`, {
+        headers, data: { kind: 'edit', changes: [{ index, before: oro.values[index], after: 'Caio, Mauricio' }] },
+      });
+      assert.equal(cambio.ok(), true);
+      await page.getByRole('button', { name: 'Abrir ficha de Oro Verde', exact: true }).waitFor({ state: 'hidden', timeout: 15000 });
+      assert.equal(await page.locator('#buscar').inputValue(), 'Oro Verde');
+    } finally { await marketing.close(); }
     assert.deepEqual(errores, []);
     console.log(`Edge: edición directa por autor, edición y eliminación pendientes, bitácora, Excel${audioPrueba ? ' y dictado local en español' : ''} verificados.`);
   } finally { await browser.close(); }

@@ -1,10 +1,13 @@
 {
   "id": "/",
-  "name": "Data App",
-  "short_name": "Data App",
+  "name": "DataApp",
+  "short_name": "DataApp",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f5f7f8",
   "theme_color": "#064c3c",
-  "icons": [{ "src": "/icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+  "icons": [
+    { "src": "/logo-dataapp-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/logo-dataapp-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
 }

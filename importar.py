@@ -7,6 +7,7 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 from openpyxl import load_workbook
+from almacenamiento import ADHERENTE, completar_adherente
 
 FUENTES = [
     ('san-pedro-2026', 'Feria San Pedro', 'San Pedro 2026', 'Estrategia de Trabajo Feria San Pedro 2026.xlsx'),
@@ -59,8 +60,11 @@ def importar(ruta, evento_id, nombre, pestana, archivo=None):
             if identificador in bases:
                 registro['base'] = bases[identificador]
             registros.append(registro)
-        return {'id': evento_id, 'evento': nombre, 'archivo': archivo or ruta.name,
-                'pestana': pestana, 'columnas': columnas, 'registros': registros}
+        catalogo = {'id': evento_id, 'evento': nombre, 'archivo': archivo or ruta.name,
+                    'pestana': pestana, 'columnas': columnas, 'registros': registros,
+                    'faltaba_adherente': ADHERENTE not in {columna.strip().upper() for columna in columnas}}
+        completar_adherente(catalogo)
+        return catalogo
     finally:
         libro.close()
 
@@ -73,6 +77,8 @@ def actualizar_catalogos(carpeta=None):
         anteriores = {e['id']: e for e in json.loads(destino.read_text(encoding='utf-8'))}
         for evento in eventos:
             previo = anteriores.get(evento['id'])
+            if previo:
+                completar_adherente(previo)
             if previo and previo['columnas'] != evento['columnas']:
                 raise ValueError('Cambió el orden o el nombre de las columnas. La actualización requiere revisión.')
     with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=destino.parent,

@@ -1,4 +1,4 @@
-"""Instala el reconocimiento local en español dentro de la carpeta de Data App."""
+"""Instala el reconocimiento local en español dentro de la carpeta de DataApp."""
 import subprocess
 import sys
 import tempfile

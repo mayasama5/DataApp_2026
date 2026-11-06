@@ -13,7 +13,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from almacenamiento import aplicar_catalogos, conectar, mismos_valores
+from almacenamiento import ADHERENTE, aplicar_catalogos, conectar, mismos_valores
 from importar import FUENTES, importar
 
 COLUMNAS_NUEVA_FERIA = [
@@ -21,8 +21,9 @@ COLUMNAS_NUEVA_FERIA = [
     'POTENCIAL MRP', 'POTENCIAL AGRO', 'POTENCIAL CLOUD', 'POTENCIAL BI', 'CONSULTOR', 'SDR',
     'STATUS VISITA', 'ACCIÓN POST VISITA', 'FECHA', 'ACCIÓN MARKETING', 'NOMBRE CONTACTO',
     'CARGO', 'CORREO', 'TELEFONO', 'LOTE / STAND', 'SECTOR', 'OBSERVACIONES',
-    'RESULTADO CRUCE CRM', 'NOMBRE COINCIDENTE EN CUENTAS.CSV', 'ESTADO EN CRM', 'CRITERIO DE CRUCE',
+    'RESULTADO CRUCE CRM', 'NOMBRE COINCIDENTE EN CUENTAS.CSV', 'ESTADO EN CRM', 'CRITERIO DE CRUCE', ADHERENTE,
 ]
+REQUERIDAS = {'EMPRESA', 'CONSULTOR', 'SDR', 'STATUS VISITA', 'NOMBRE CONTACTO', 'CARGO', 'CORREO', 'TELEFONO'}
 
 
 def configuracion():
@@ -82,9 +83,12 @@ def guardar_bases(libro, bases):
 
 
 def hojas_actividad(libro, actividades):
+    for anterior in ('Contactos Data App', 'Actividades Data App'):
+        if anterior in libro:
+            del libro[anterior]
     for nombre, encabezados in [
-        ('Contactos Data App', ['Empresa', 'Nombre', 'Cargo', 'Correo', 'Teléfono', 'Registrado por']),
-        ('Actividades Data App', ['Empresa', 'Tipo', 'Estado', 'Próximo seguimiento', 'Observaciones', 'Registrado por', 'Fecha']),
+        ('Contactos DataApp', ['Empresa', 'Nombre', 'Cargo', 'Correo', 'Teléfono', 'Registrado por']),
+        ('Actividades DataApp', ['Empresa', 'Tipo', 'Estado', 'Próximo seguimiento', 'Observaciones', 'Registrado por', 'Fecha']),
     ]:
         if nombre in libro:
             del libro[nombre]
@@ -95,12 +99,12 @@ def hojas_actividad(libro, actividades):
         datos = json.loads(fila['details_json'])
         empresa = json.loads(fila['values_json'])[0]
         if fila['kind'] == 'contact':
-            anexar(libro['Contactos Data App'], [empresa, *(datos.get(k) for k in ('name', 'position', 'email', 'phone')), fila['author']])
+            anexar(libro['Contactos DataApp'], [empresa, *(datos.get(k) for k in ('name', 'position', 'email', 'phone')), fila['author']])
         elif fila['kind'] == 'visit':
             fecha = datetime.fromtimestamp(fila['created_at'], timezone.utc).isoformat(timespec='seconds')
-            anexar(libro['Actividades Data App'], [empresa, 'Visita o seguimiento', *(datos.get(k) for k in ('status', 'nextDate', 'notes')), fila['author'], fecha])
-    formato(libro['Contactos Data App'])
-    formato(libro['Actividades Data App'])
+            anexar(libro['Actividades DataApp'], [empresa, 'Visita o seguimiento', *(datos.get(k) for k in ('status', 'nextDate', 'notes')), fila['author'], fecha])
+    formato(libro['Contactos DataApp'])
+    formato(libro['Actividades DataApp'])
 
 
 def exportar(evento_id):
@@ -144,8 +148,7 @@ def recibir(archivo, evento_id):
             'SELECT 1 FROM companies WHERE event_id=? LIMIT 1', (evento_id,)
         ).fetchone()
         if inicial and catalogo['registros']:
-            requeridas = {'EMPRESA', 'CONSULTOR', 'SDR', 'STATUS VISITA', 'NOMBRE CONTACTO', 'CARGO', 'CORREO', 'TELEFONO'}
-            if not requeridas.issubset({campo.strip() for campo in catalogo['columnas']}):
+            if not REQUERIDAS.issubset({campo.strip() for campo in catalogo['columnas']}):
                 raise ValueError('La planilla debe incluir las columnas de empresa, consultor, SDR, estado de visita y contacto. Podés descargar la plantilla de esta feria.')
             db.execute('UPDATE events SET columns_json=? WHERE id=?',
                        (json.dumps(catalogo['columnas'], ensure_ascii=False), evento_id))
@@ -177,7 +180,15 @@ def actualizar_copia(ruta, fuente, esperada):
             por_id = {empresa['id']: empresa for empresa in empresas}
             hoja = libro[pestana]
             max_actividad = actividades[-1]['id'] if actividades else 0
-            cambio = libro['Data App']['B1'].value != max_actividad
+            cambio = libro['Data App']['B1'].value != max_actividad or 'Contactos Data App' in libro or 'Actividades Data App' in libro
+            if catalogo['faltaba_adherente']:
+                posicion = len(catalogo['columnas'])
+                hoja.insert_cols(posicion)
+                poner(hoja.cell(1, posicion), ADHERENTE)
+                hoja.column_dimensions[get_column_letter(posicion)].hidden = False
+                hoja.column_dimensions[get_column_letter(posicion + 1)].hidden = True
+                formato(hoja)
+                cambio = True
             bases = {}
             for registro in catalogo['registros']:
                 empresa = por_id[registro['id']]

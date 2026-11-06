@@ -26,7 +26,7 @@ async function grabarLocal(sesion, actualizar, insertar) {
     microfono = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
   } catch (error) {
     const mensaje = {
-      NotAllowedError: 'Permití el micrófono para Data App. Si el navegador integrado lo bloquea, abrí la misma dirección en Edge o Chrome.',
+      NotAllowedError: 'Permití el micrófono para DataApp. Si el navegador integrado lo bloquea, abrí la misma dirección en Edge o Chrome.',
       NotFoundError: 'Conectá o activá un micrófono para dictar.',
       NotReadableError: 'No se pudo abrir el micrófono. Revisá que esté disponible.',
     }[error.name];
@@ -108,7 +108,7 @@ function dictarEnNavegador(sesion, actualizar, insertar) {
   };
   reconocimiento.onerror = evento => {
     mensaje = evento.error === 'not-allowed' || evento.error === 'service-not-allowed'
-      ? 'Permití el micrófono o abrí Data App en Edge o Chrome.'
+      ? 'Permití el micrófono o abrí DataApp en Edge o Chrome.'
       : 'El reconocimiento del navegador no respondió. Podés usar el micrófono del teclado.';
   };
   reconocimiento.onend = () => { if (!sesion.signal.aborted) sesion.terminar(mensaje); };

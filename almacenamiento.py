@@ -1,4 +1,4 @@
-"""Persistencia local, autenticación e historial de Data App."""
+"""Persistencia local, autenticación e historial de DataApp."""
 import hashlib
 import hmac
 import json
@@ -12,6 +12,17 @@ from contextlib import contextmanager
 from pathlib import Path
 
 BASE = Path(os.environ.get('DATAAPP_DB', Path(__file__).with_name('dataapp.sqlite3')))
+ADHERENTE = 'ADHERENTE?'
+
+
+def completar_adherente(evento):
+    if ADHERENTE in {columna.strip().upper() for columna in evento['columnas']}:
+        return
+    evento['columnas'].append(ADHERENTE)
+    for registro in evento['registros']:
+        registro['valores'].append(None)
+        if 'base' in registro:
+            registro['base'].append(None)
 
 
 @contextmanager
@@ -56,6 +67,13 @@ def inicializar():
                 id INTEGER PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
                 action TEXT NOT NULL, event_id TEXT REFERENCES events(id),
                 description TEXT NOT NULL, created_at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS tasks (
+                user_id TEXT NOT NULL REFERENCES users(id), id TEXT NOT NULL, title TEXT NOT NULL,
+                date TEXT NOT NULL, time TEXT NOT NULL, done INTEGER NOT NULL CHECK(done IN (0,1)),
+                version INTEGER NOT NULL, completed_at REAL, PRIMARY KEY(user_id,id));
+            CREATE TABLE IF NOT EXISTS task_operations (
+                user_id TEXT NOT NULL REFERENCES users(id), operation_id TEXT NOT NULL,
+                PRIMARY KEY(user_id,operation_id));
         ''')
         campos_usuario = {fila['name'] for fila in db.execute('PRAGMA table_info(users)')}
         if 'profile' not in campos_usuario:
@@ -64,6 +82,20 @@ def inicializar():
             db.execute("ALTER TABLE users ADD COLUMN assignment TEXT NOT NULL DEFAULT ''")
         if 'archived_at' not in {fila['name'] for fila in db.execute('PRAGMA table_info(events)')}:
             db.execute('ALTER TABLE events ADD COLUMN archived_at REAL')
+        if 'year' not in {fila['name'] for fila in db.execute('PRAGMA table_info(events)')}:
+            db.execute('ALTER TABLE events ADD COLUMN year INTEGER NOT NULL DEFAULT 2026')
+        if 'event_id' not in {fila['name'] for fila in db.execute('PRAGMA table_info(tasks)')}:
+            db.execute('ALTER TABLE tasks ADD COLUMN event_id TEXT REFERENCES events(id)')
+        for feria in db.execute('SELECT id,columns_json FROM events').fetchall():
+            columnas = json.loads(feria['columns_json'])
+            if ADHERENTE in {columna.strip().upper() for columna in columnas}:
+                continue
+            columnas.append(ADHERENTE)
+            db.execute('UPDATE events SET columns_json=? WHERE id=?', (json.dumps(columnas, ensure_ascii=False), feria['id']))
+            db.execute("""UPDATE companies SET values_json=json_insert(values_json,'$[#]',NULL),
+                source_json=json_insert(source_json,'$[#]',NULL),version=version+1 WHERE event_id=?""", (feria['id'],))
+            db.execute("""UPDATE import_conflicts SET incoming_json=json_insert(incoming_json,'$[#]',NULL)
+                WHERE company_id IN (SELECT id FROM companies WHERE event_id=?)""", (feria['id'],))
         if 'deleted_at' not in {fila['name'] for fila in db.execute('PRAGMA table_info(activities)')}:
             db.execute('ALTER TABLE activities ADD COLUMN deleted_at REAL')
         if 'record_id' not in {fila['name'] for fila in db.execute('PRAGMA table_info(sync_operations)')}:
@@ -82,14 +114,15 @@ def mismos_valores(a, b):
 
 def aplicar_catalogos(db, eventos):
     for evento in eventos:
+        completar_adherente(evento)
         anterior = db.execute('SELECT columns_json,archived_at FROM events WHERE id=?', (evento['id'],)).fetchone()
         if anterior and anterior['archived_at'] is not None:
             continue
         columnas = json.dumps(evento['columnas'], ensure_ascii=False)
         if anterior and [campo.strip() for campo in json.loads(anterior['columns_json'])] != [campo.strip() for campo in evento['columnas']]:
             raise ValueError('Cambió el orden o el nombre de las columnas. La importación requiere revisión.')
-        db.execute('INSERT INTO events(id,name,source,sheet,columns_json) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
-                   (evento['id'], evento['evento'], evento['archivo'], evento['pestana'], columnas))
+        db.execute('INSERT INTO events(id,name,source,sheet,columns_json,year) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
+                   (evento['id'], evento['evento'], evento['archivo'], evento['pestana'], columnas, evento.get('year', 2026)))
         for registro in evento['registros']:
             entrantes = json.loads(json.dumps(registro['valores'], ensure_ascii=False, default=str))
             serializados = json.dumps(entrantes, ensure_ascii=False)
@@ -158,6 +191,14 @@ def asignada(usuario, columnas, valores):
     return indice is not None and asignacion in {
         nombre_normalizado(nombre) for nombre in re.split(r'[,;/\n]', str(valores[indice] or '')) if nombre.strip()
     }
+
+
+def acceso_feria(db, usuario, feria):
+    if administra(usuario):
+        return True
+    columnas = json.loads(feria['columns_json'])
+    return any(asignada(usuario, columnas, json.loads(fila[0]))
+               for fila in db.execute('SELECT values_json FROM companies WHERE event_id=?', (feria['id'],)))
 
 
 def registrar(db, usuario_id, accion, descripcion='', evento_id=None):

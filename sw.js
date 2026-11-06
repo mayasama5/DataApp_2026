@@ -1,5 +1,5 @@
-const CACHE = 'data-app-interfaz-v5';
-const INTERFAZ = ['./', './index.html', './estilos.css', './app.js', './campos.js', './offline.js', './dictado.js', './captura-voz.js', './manifest.webmanifest', './icono.svg'];
+const CACHE = 'data-app-interfaz-v7';
+const INTERFAZ = ['./', './index.html', './estilos.css', './app.js', './campos.js', './offline.js', './dictado.js', './captura-voz.js', './manifest.webmanifest', './logo-dataapp-192.png', './logo-dataapp-512.png'];
 
 self.addEventListener('install', evento => {
   evento.waitUntil(caches.open(CACHE).then(cache => cache.addAll(INTERFAZ)).then(() => self.skipWaiting()));

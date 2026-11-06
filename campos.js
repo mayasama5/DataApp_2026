@@ -69,8 +69,8 @@ function multiple(campo, titulo, opciones, valor) {
 }
 
 export function crearCampo(columna, indice, valor, asignaciones = {}) {
-  const titulo = columna.trim();
-  const campo = claveCampo(titulo);
+  const campo = claveCampo(columna);
+  const titulo = campo === 'ADHERENTE?' ? 'Adherente / parcería' : columna.trim();
   if (Object.hasOwn(opcionesMultiples, campo)) {
     const opciones = [...opcionesMultiples[campo]];
     if (campo === 'CONSULTOR') {

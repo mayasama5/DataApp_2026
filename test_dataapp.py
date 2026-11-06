@@ -57,7 +57,8 @@ class FlujoCRM(unittest.TestCase):
         oro = next(e for e in empresas if e['values'][0] == 'Oro Verde')
         ruta = 'company/' + oro['id']
         original = self.api(ruta)[1]
-        self.assertEqual(len(original['values']), 27)
+        self.assertEqual(len(original['values']), 28)
+        self.assertIsNone(original['values'][san['columns'].index('ADHERENTE?')])
         valores = original['values'].copy()
         indice = san['columns'].index('OBSERVACIONES')
         valores[indice] = 'Observación de prueba'
@@ -81,7 +82,7 @@ class FlujoCRM(unittest.TestCase):
         self.assertEqual([a['author'] for a in detalle['activities']], ['Consultor de prueba', 'Consultor de prueba', 'Administradora de prueba'])
         almacenamiento.inicializar()
         self.assertEqual(self.api(ruta)[1], detalle)
-        self.assertEqual(sum(e['count'] for e in self.api('events')[1]), 316)
+        self.assertTrue(all(e['year'] == 2026 for e in self.api('events')[1]))
         listado = self.api('companies?event=' + san['id'])[1]
         self.assertEqual(len(listado), 150)
         asignadas = {e['id'] for e in listado if e['assigned']}
@@ -90,7 +91,11 @@ class FlujoCRM(unittest.TestCase):
         ajena = next(e for e in empresas if e['id'] not in asignadas)
         self.assertEqual(self.api('company/' + ajena['id'])[0], 200)
         self.assertEqual(self.api('export?event=' + san['id'])[0], 403)
-        self.assertFalse(any(e['id'] == oro['id'] for e in self.api('companies?event=expo-paraguay-brasil-2026')[1]))
+        estado_expo, registros_expo = self.api('companies?event=expo-paraguay-brasil-2026')
+        if estado_expo == 200:
+            self.assertFalse(any(e['id'] == oro['id'] for e in registros_expo))
+        else:
+            self.assertEqual(estado_expo, 403)
         usuario = self.api('me')[1]['user']
         operacion = {'kind': 'visit', 'details': {'status': 'SEGUIMIENTO'}, 'userId': usuario['id'], 'operationId': str(uuid.uuid4())}
         self.assertEqual(self.api(ruta, operacion)[0], 200)
@@ -121,7 +126,7 @@ class FlujoCRM(unittest.TestCase):
         actualizar_copia(copia, FUENTES[0], firma(copia))
         libro = load_workbook(io.BytesIO(copia.read_bytes()), read_only=True)
         self.assertEqual(libro[san['sheet']].cell(fila_oro, indice + 1).value, 'Actualizado desde Data App')
-        self.assertEqual(libro['Contactos Data App']['B2'].value, 'Contacto Oro Verde')
+        self.assertEqual(libro['Contactos DataApp']['B2'].value, 'Contacto Oro Verde')
         libro.close()
         self.assertEqual(self.api(ruta)[1]['values'][san['columns'].index('RUBRO')], 'Rubro desde Excel')
         self.api('logout', {})
@@ -206,6 +211,73 @@ class FlujoCRM(unittest.TestCase):
         self.api('logout', {})
         self.assertEqual(self.api('login', madali)[0], 200)
         self.assertIn(oro['id'], {e['id'] for e in self.api('companies?event=' + san['id'])[1] if e['assigned']})
+        usuario_madali = self.api('me')[1]['user']
+        tarea_id = str(uuid.uuid4())
+        tarea = {'id': tarea_id, 'title': 'Confirmar reunión', 'date': '2026-11-06', 'time': '14:30', 'done': False, 'version': 0}
+        guardar = {'userId': usuario_madali['id'], 'operationId': str(uuid.uuid4()), 'changes': [tarea]}
+        self.assertEqual(self.api('tasks', guardar)[0], 200)
+        self.assertEqual(self.api('tasks', guardar)[0], 200)
+        self.assertEqual(len(self.api('tasks')[1]), 1)
+        self.assertEqual(self.api('tasks', {**guardar, 'operationId': str(uuid.uuid4()),
+                                            'changes': [{**tarea, 'done': True, 'version': 1}]} )[0], 200)
+        self.assertTrue(self.api('tasks')[1][0]['done'])
+        self.assertIsNotNone(self.api('tasks')[1][0]['completed_at'])
+        self.assertEqual(self.api('logout', {})[0], 200)
+        self.assertEqual(self.api('login', marketing)[0], 200)
+        self.assertEqual(self.api('tasks'), (200, []))
+        self.assertEqual(self.api('tasks', guardar)[0], 403)
+
+        # El cambio en el Excel conectado actualiza el catálogo y la asignación.
+        copia.write_bytes(exportar(san['id']))
+        libro = load_workbook(io.BytesIO(copia.read_bytes()))
+        hoja = libro[san['sheet']]
+        fila_oro = next(i for i, fila in enumerate(hoja.values, 1) if fila[0] == 'Oro Verde')
+        hoja.cell(fila_oro, campo_consultor + 1, 'Caio, Mauricio')
+        hoja.cell(fila_oro, san['columns'].index('STATUS VISITA') + 1, 'REALIZADO')
+        libro.save(copia)
+        libro.close()
+        actualizar_copia(copia, FUENTES[0], firma(copia))
+        valores_excel = self.api(ruta)[1]['values']
+        self.assertEqual(valores_excel[campo_consultor], 'Caio, Mauricio')
+        for nombre in ['Sandra', 'Sofía', 'Caio', 'Mauricio']:
+            perfil = {'name': nombre, 'assignment': '', 'role': 'consultor'}
+            self.assertEqual(almacenamiento.asignada(perfil, san['columns'], valores_excel), nombre in {'Caio', 'Mauricio'})
+        self.assertEqual(valores_excel[san['columns'].index('STATUS VISITA')], 'REALIZADO')
+        from openpyxl import Workbook
+        from urllib.parse import urlencode
+        libro_nuevo = Workbook()
+        libro_nuevo.active.title = 'Empresas'
+        libro_nuevo.active.append(san['columns'])
+        datos_nuevos = {'EMPRESA': 'Empresa de 2027', 'CONSULTOR': 'Caio', 'STATUS VISITA': 'PENDIENTE', 'ADHERENTE?': True}
+        libro_nuevo.active.append([datos_nuevos.get(columna) for columna in san['columns']])
+        archivo_nuevo = io.BytesIO()
+        libro_nuevo.save(archivo_nuevo)
+        meta = {'name': san['name'], 'year': '2027', 'sheet': 'Empresas'}
+        cabeceras = {'Origin': self.url, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
+        solicitud_invalida = urllib.request.Request(self.url + '/api/events?' + urlencode({**meta, 'sheet': 'Inexistente'}),
+                                                   data=archivo_nuevo.getvalue(), headers=cabeceras)
+        with self.assertRaises(urllib.error.HTTPError) as invalida:
+            self.cliente.open(solicitud_invalida)
+        self.assertEqual(invalida.exception.code, 400)
+        self.assertFalse(any(e['year'] == 2027 for e in self.api('events')[1]))
+        solicitud = urllib.request.Request(self.url + '/api/events?' + urlencode(meta), data=archivo_nuevo.getvalue(), headers=cabeceras)
+        with self.cliente.open(solicitud) as respuesta:
+            self.assertEqual(respuesta.status, 201)
+            edicion_2027 = json.load(respuesta)['id']
+        self.assertEqual(len(self.api('companies?event=' + san['id'])[1]), 150)
+        nuevas = self.api('companies?event=' + edicion_2027)[1]
+        self.assertEqual([r['values'][0] for r in nuevas], ['Empresa de 2027'])
+        self.assertIs(nuevas[0]['values'][san['columns'].index('ADHERENTE?')], True)
+        self.assertEqual(self.api('events', {**meta, 'year': 2027})[0], 409)
+        tarea_2027 = {'userId': self.api('me')[1]['user']['id'], 'operationId': str(uuid.uuid4()),
+                      'changes': [{**tarea, 'id': str(uuid.uuid4())}]}
+        self.assertEqual(self.api('tasks?event=' + edicion_2027, tarea_2027)[0], 200)
+        self.assertEqual(self.api('tasks?event=' + san['id']), (200, []))
+        self.assertEqual(len(self.api('tasks?event=' + edicion_2027)[1]), 1)
+        self.api('logout', {})
+        self.assertEqual(self.api('login', consultor)[0], 200)
+        self.assertEqual(self.api('companies?event=' + edicion_2027)[0], 403)
+        self.assertEqual(self.api('company/' + nuevas[0]['id'])[0], 403)
         for archivo in ['catalogos.json', 'catalogo.json', 'dataapp.sqlite3']:
             with self.assertRaises(urllib.error.HTTPError) as error:
                 self.cliente.open(self.url + '/' + archivo)

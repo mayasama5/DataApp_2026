@@ -230,10 +230,59 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   color:#52655b;
   font-size:.85rem;
 }
-.nav.activo {
-  background:#e9f4ee;
-  color:#006548;
+.nav[aria-current="page"] {
   font-weight:650;
+}
+.nav:active {
+  background:#e9f4ee;
+}
+@media (hover: hover) {
+  .nav:hover {
+    background:#e9f4ee;
+  }
+}
+.checklist {
+  margin-bottom: 24px;
+}
+.tarea-campos, .tarea-plantilla {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 12px;
+}
+.tarea-campos {
+  margin-bottom: 12px;
+}
+.tarea-nombre {
+  flex: 1 1 220px;
+}
+.tarea-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--borde);
+  padding: 10px 0;
+}
+.tarea-fila label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.tarea-fila label input {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+  accent-color: var(--verde);
+}
+.tarea-fila small {
+  display: block;
+  margin: 2px 0 0 1.65rem;
+}
+.tarea-hecha {
+  text-decoration: line-through;
 }
 .lateral-pie {
   margin-top:auto;

@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 title DataApp
-set "DATAAPP_PYTHON=%ProgramFiles%\WindowsApps\OpenAI.CodexPrimaryRuntime.v26-1104-1290-0_26.1104.1290.0_x64__3k8sg7r9htsxt\dependencies\python\python.exe"
+set "DATAAPP_PYTHON=%ProgramFiles%\WindowsApps\OpenAI.CodexPrimaryRuntime.v26-1105-1297-0_26.1105.1297.0_x64__3k8sg7r9htsxt\dependencies\python\python.exe"
 if exist "%DATAAPP_PYTHON%" goto abrir
 set "DATAAPP_PYTHON="
 for /d %%D in ("%ProgramFiles%\WindowsApps\OpenAI.CodexPrimaryRuntime.*") do if exist "%%~fD\dependencies\python\python.exe" set "DATAAPP_PYTHON=%%~fD\dependencies\python\python.exe"

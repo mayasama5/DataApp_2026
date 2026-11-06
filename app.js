@@ -7,11 +7,15 @@ let usuario;
 let requiereConfiguracion = false;
 let eventos = [];
 let eventoActual;
+let feriaSeleccionada = '';
 let empresas = [];
 let empresaActual;
 let detalleActual;
 let lectoresFicha;
 let vistaCatalogo = 'feria';
+let paginaActual = 'portada';
+let numeroVista = 0;
+let actualizandoVista = false;
 const roles = { admin: 'Marketing', consultor: 'Consultor de ventas', sdr: 'SDR', marketing: 'Marketing' };
 const esMarketing = () => ['admin', 'marketing'].includes(usuario?.role);
 let nombresAsignacion = {};
@@ -43,10 +47,10 @@ async function api(ruta, cuerpo) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo),
     });
   } catch {
-    throw Object.assign(new Error('No pudimos conectar con Data App.'), { sinConexion: true });
+    throw Object.assign(new Error('No pudimos conectar con DataApp.'), { sinConexion: true });
   }
   if ([502, 503, 504].includes(respuesta.status)) {
-    throw Object.assign(new Error('Data App está temporalmente sin conexión.'), { sinConexion: true });
+    throw Object.assign(new Error('DataApp está temporalmente sin conexión.'), { sinConexion: true });
   }
   const resultado = await respuesta.json();
   if (!respuesta.ok) {
@@ -65,7 +69,8 @@ async function api(ruta, cuerpo) {
 }
 
 function rutaCache(ruta, cuenta = usuario) {
-  return `${cuenta.id}:${cuenta.role}:${cuenta.assignment || ''}:${ruta}`;
+  const ambito = ruta === 'events' || ruta.startsWith('companies?') ? 'ediciones:' : '';
+  return `${cuenta.id}:${cuenta.role}:${cuenta.assignment || ''}:${ambito}${ruta}`;
 }
 
 async function consultar(ruta, alternativa, registrarConsulta = false) {
@@ -100,36 +105,41 @@ function sincronizar() {
     const cola = await pendientesDe(usuarioId).catch(() => []);
     const bloqueadas = new Set();
     let mensaje = '';
+    let tareasEnviadas = false;
     for (const op of cola) {
-      if (usuario?.id !== usuarioId || bloqueadas.has(op.empresaId)) continue;
-      const ruta = `company/${op.empresaId}`;
+      const ruta = op.ruta || `company/${op.empresaId}`;
+      if (usuario?.id !== usuarioId || bloqueadas.has(ruta)) continue;
       try {
         await api(ruta, { ...op.cuerpo, operationId: op.id, userId: usuarioId });
         const detalle = await api(ruta);
         await guardarCache(rutaCache(ruta, cuenta), detalle);
         await quitarPendiente(op.id);
         sinConexion = false;
+        if (ruta.startsWith('tasks')) tareasEnviadas = true;
       } catch (error) {
         if (error.sinConexion) {
           sinConexion = true;
           break;
         }
         if (!usuario) break;
-        bloqueadas.add(op.empresaId);
+        bloqueadas.add(ruta);
         mensaje = error.estado === 409
           ? `${error.message} Tu registro sigue guardado en este dispositivo y requiere revisión antes de enviarse.`
           : error.message;
       }
+    }
+    if (tareasEnviadas && usuario?.id === usuarioId && !$('#checklist').hidden && paginaActual === 'catalogo') {
+      await cargarTareas().catch(() => {});
     }
     await estadoConexion(mensaje);
   })().finally(() => { sincronizacion = null; });
   return sincronizacion;
 }
 
-async function guardarOperacion(cuerpo) {
+async function guardarOperacion(cuerpo, ruta) {
   const op = {
-    id: crypto.randomUUID(), empresaId: empresaActual.id, usuarioId: usuario.id,
-    eventoId: eventoActual.id, cuerpo, orden: Date.now(),
+    id: crypto.randomUUID(), usuarioId: usuario.id, cuerpo, orden: Date.now(),
+    ...(ruta ? { ruta } : { empresaId: empresaActual.id, eventoId: eventoActual.id }),
   };
   await guardarPendiente(op);
   await sincronizar();
@@ -210,7 +220,19 @@ async function conEnvio(formulario, mensaje, accion) {
 }
 
 function pantalla(id) {
-  for (const opcion of ['portada', 'catalogo', 'equipo', 'auditoria']) $(`#${opcion}`).hidden = opcion !== id;
+  paginaActual = id;
+  numeroVista++;
+  for (const opcion of ['portada', 'ediciones', 'catalogo', 'equipo', 'auditoria']) $(`#${opcion}`).hidden = opcion !== id;
+  $('#cartera').hidden = !eventoActual;
+  $('#pendientes').hidden = !eventoActual;
+  const seleccionado = {
+    portada: 'inicio', ediciones: 'inicio', catalogo: vistaCatalogo === 'feria' ? 'inicio' : vistaCatalogo,
+    equipo: 'usuarios', auditoria: 'registro-actividad',
+  }[id];
+  for (const nav of document.querySelectorAll('.lateral .nav')) {
+    if (nav.id === seleccionado) nav.setAttribute('aria-current', 'page');
+    else nav.removeAttribute('aria-current');
+  }
   $('#mensaje').textContent = '';
 }
 
@@ -230,31 +252,73 @@ async function iniciarEspacio() {
   $('#lista-archivadas').hidden = true;
   $('#nueva-feria').hidden = true;
   $('#password').value = '';
+  mostrarPortada();
+  abrirInicio();
+  await estadoConexion();
+  if (!sinConexion) {
+    const cuenta = usuario;
+    const rutas = ['tasks', ...eventos.filter(evento => evento.accessible)
+      .map(evento => `companies?event=${encodeURIComponent(evento.id)}`)];
+    Promise.allSettled(rutas.map(ruta => api(ruta).then(datos => guardarCache(rutaCache(ruta, cuenta), datos))))
+      .then(() => sincronizar());
+  }
+}
+
+function mostrarPortada() {
+  const nombres = [...new Map(eventos.map(feria => [claveFeria(feria.name), feria.name])).values()];
   $('#ferias').replaceChildren();
   $('#metricas').replaceChildren();
-  for (const [numero, titulo] of [[eventos.length, 'Ferias disponibles'], [eventos.reduce((n, e) => n + e.count, 0), 'Registros de empresas']]) {
+  for (const [numero, titulo] of [[nombres.length, 'Ferias y eventos'], [eventos.filter(feria => feria.accessible).length, 'Ediciones disponibles']]) {
     const tarjeta = texto('div', '', 'metrica');
     tarjeta.append(texto('strong', numero), texto('span', titulo));
     $('#metricas').append(tarjeta);
   }
-  for (const evento of eventos) {
-    const tarjeta = texto('button', '', `feria ${evento.id.startsWith('san') ? 'verde' : 'azul'}`);
-    tarjeta.append(texto('span', 'FERIA COMERCIAL', 'etiqueta'), texto('h2', evento.name),
-      texto('p', evento.id.startsWith('san') ? 'Relaciones que impulsan el campo.' : 'Un espacio para nuevos negocios.'),
-      texto('strong', `${evento.count} registros`), texto('span', 'Explorar empresas →', 'explorar'));
-    tarjeta.addEventListener('click', () => abrirEvento(evento).catch(error => { $('#mensaje').textContent = error.message; }));
+  for (const nombre of nombres) {
+    const tarjeta = texto('button', '', `feria ${claveFeria(nombre).includes('san pedro') ? 'verde' : 'azul'}`);
+    tarjeta.append(texto('span', 'FERIA COMERCIAL', 'etiqueta'), texto('h2', nombre),
+      texto('span', 'Ver ediciones →', 'explorar'));
+    tarjeta.addEventListener('click', () => mostrarEdiciones(nombre));
     $('#ferias').append(tarjeta);
   }
+}
+
+function claveFeria(nombre) {
+  return normalizar(nombre).replace(/\s+/g, ' ');
+}
+
+function abrirInicio() {
+  eventoActual = null;
+  feriaSeleccionada = '';
   pantalla('portada');
-  await estadoConexion();
-  if (!sinConexion) {
-    const cuenta = usuario;
-    const catalogos = eventos.map(evento => {
-      const ruta = `companies?event=${encodeURIComponent(evento.id)}`;
-      return api(ruta).then(registros => guardarCache(rutaCache(ruta, cuenta), registros));
-    });
-    Promise.allSettled(catalogos).then(() => sincronizar());
+}
+
+function mostrarEdiciones(nombre) {
+  eventoActual = null;
+  feriaSeleccionada = nombre;
+  const ediciones = eventos.filter(feria => claveFeria(feria.name) === claveFeria(nombre));
+  const anios = [...new Set([2026, 2027, ...ediciones.map(feria => feria.year)])].sort();
+  $('#ediciones-titulo').textContent = nombre;
+  $('#lista-ediciones').replaceChildren();
+  for (const anio of anios) {
+    const feria = ediciones.find(edicion => edicion.year === anio);
+    const tarjeta = texto('article', '', 'panel edicion');
+    tarjeta.append(texto('h2', anio));
+    if (feria?.accessible) {
+      tarjeta.append(texto('p', `${feria.count} registros`, 'ayuda'));
+      const abrir = texto('button', `Abrir ${anio}`, 'primario');
+      abrir.addEventListener('click', () => abrirEvento(feria).catch(error => { $('#mensaje').textContent = error.message; }));
+      tarjeta.append(abrir);
+    } else {
+      tarjeta.append(texto('p', feria ? 'Tu cuenta no tiene asignaciones en esta edición.' : 'Edición aún sin datos.', 'ayuda'));
+      if (!feria && esMarketing()) {
+        const crear = texto('button', `Crear edición ${anio}`, 'secundario');
+        crear.addEventListener('click', () => prepararFeria(nombre, anio));
+        tarjeta.append(crear);
+      }
+    }
+    $('#lista-ediciones').append(tarjeta);
   }
+  pantalla('ediciones');
 }
 
 $('#login').addEventListener('submit', evento => {
@@ -269,7 +333,7 @@ $('#login').addEventListener('submit', evento => {
     $('#password').minLength = 1;
     $('#acceso-titulo').textContent = 'Ingresá a tu espacio';
     $('#acceso-texto').textContent = 'Consultá tus ferias y continuá donde lo dejaste.';
-    $('#ingresar').textContent = 'Ingresar a Data App →';
+    $('#ingresar').textContent = 'Ingresar a DataApp →';
     await iniciarEspacio();
   });
 });
@@ -288,8 +352,12 @@ $('#salir').addEventListener('click', async () => {
     $('#error-login').textContent = '';
   } catch (error) { $('#mensaje').textContent = error.message; }
 });
-$('#inicio').addEventListener('click', () => pantalla('portada'));
-$('#volver').addEventListener('click', () => pantalla('portada'));
+$('#inicio').addEventListener('click', abrirInicio);
+$('#volver-ferias').addEventListener('click', abrirInicio);
+$('#volver').addEventListener('click', () => {
+  if (vistaCatalogo === 'feria') mostrarEdiciones(eventoActual.name);
+  else abrirEvento(eventoActual).catch(error => { $('#mensaje').textContent = error.message; });
+});
 $('#usuarios').addEventListener('click', () => {
   pantalla('equipo');
   cargarCuentas().catch(error => { $('#mensaje').textContent = error.message; });
@@ -298,10 +366,16 @@ for (const [id, vista] of [['cartera', 'cartera'], ['pendientes', 'pendientes']]
   $(`#${id}`).addEventListener('click', () => abrirCartera(vista).catch(error => { $('#mensaje').textContent = error.message; }));
 }
 
-$('#agregar-feria').addEventListener('click', () => {
+function prepararFeria(nombre = '', anio = 2026) {
+  abrirInicio();
+  $('#nueva-feria').reset();
+  $('#nueva-feria-estado').textContent = '';
+  $('#feria-nombre-nueva').value = nombre;
+  $('#feria-anio-nueva').value = anio;
   $('#nueva-feria').hidden = false;
   $('#feria-nombre-nueva').focus();
-});
+}
+$('#agregar-feria').addEventListener('click', () => prepararFeria());
 $('#cancelar-feria').addEventListener('click', () => { $('#nueva-feria').hidden = true; });
 $('#editar-feria').addEventListener('click', () => {
   $('#renombrar-estado').textContent = '';
@@ -348,7 +422,7 @@ $('#ferias-archivadas').addEventListener('click', async () => {
           $('#mensaje').textContent = 'Feria restaurada.';
         } catch (error) { $('#mensaje').textContent = error.message; }
       });
-      fila.append(texto('strong', feria.name), boton);
+      fila.append(texto('strong', `${feria.name} · ${feria.year}`), boton);
       lista.append(fila);
     }
   } catch (error) { $('#mensaje').textContent = error.message; }
@@ -385,11 +459,15 @@ $('#auditoria-mas').addEventListener('click', () => mostrarActividad());
 $('#nueva-feria').addEventListener('submit', evento => {
   evento.preventDefault();
   conEnvio(evento.currentTarget, $('#nueva-feria-estado'), async () => {
-    const creada = await api('events', Object.fromEntries(new FormData($('#nueva-feria'))));
+    const formulario = $('#nueva-feria');
+    const datos = Object.fromEntries(new FormData(formulario));
+    const archivo = $('#feria-excel-nuevo').files[0];
+    const creada = archivo ? await enviarExcel('events', datos, archivo) : await api('events', datos);
     $('#nueva-feria').reset();
     await iniciarEspacio();
     await abrirEvento(eventos.find(feria => feria.id === creada.id));
-    $('#estado-excel').textContent = 'Feria creada. Importá tu Excel o descargá la plantilla con Exportar Excel.';
+    $('#estado-excel').textContent = archivo ? 'Edición creada y Excel importado.'
+      : 'Edición creada. Importá tu Excel o descargá la plantilla con Exportar Excel.';
   });
 });
 $('#actualizar-bases').addEventListener('click', async () => {
@@ -400,8 +478,8 @@ $('#actualizar-bases').addEventListener('click', async () => {
     const resultado = await api('refresh', {});
     await iniciarEspacio();
     $('#actualizar-estado').textContent = resultado.conflicts
-      ? `Bases actualizadas. ${resultado.conflicts} fichas tienen cambios tanto en Excel como en Data App. Se conservaron las ediciones de Data App y se marcaron para revisión.`
-      : 'Bases actualizadas desde las planillas. Los contactos, las visitas y las ediciones de Data App se conservaron.';
+      ? `Bases actualizadas. ${resultado.conflicts} fichas tienen cambios tanto en Excel como en DataApp. Se conservaron las ediciones de DataApp y se marcaron para revisión.`
+      : 'Bases actualizadas desde las planillas. Los contactos, las visitas y las ediciones de DataApp se conservaron.';
   } catch (error) { $('#actualizar-estado').textContent = error.message; }
   finally { boton.disabled = false; }
 });
@@ -492,7 +570,10 @@ function contactosParaBuscar(actividades) {
 async function abrirEvento(evento) {
   empresas = await cargarEmpresas(evento);
   eventoActual = evento;
+  feriaSeleccionada = evento.name;
   vistaCatalogo = 'feria';
+  $('#edicion-actual').textContent = `${evento.name} · ${evento.year}`;
+  $('#volver').textContent = '← Elegir año';
   $('#feria-titulo').textContent = evento.name;
   $('#fuente').textContent = `Base de trabajo · ${evento.sheet} · ${evento.columns.length} campos por ficha`;
   $('#buscar').value = '';
@@ -502,29 +583,215 @@ async function abrirEvento(evento) {
   $('#importar').hidden = !esMarketing();
   $('#estado-excel').textContent = '';
   $('#renombrar-feria').hidden = true;
+  $('#checklist').hidden = true;
+  $('#visitas-pendientes-titulo').hidden = true;
   pantalla('catalogo');
   listar();
   await estadoConexion();
 }
 
 async function abrirCartera(vista) {
-  const catalogos = await Promise.allSettled(eventos.map(cargarEmpresas));
-  empresas = catalogos.flatMap(resultado => resultado.status === 'fulfilled' ? resultado.value : [])
-    .filter(empresa => esMarketing() || empresa.assigned);
+  const feria = eventoActual;
+  if (!feria) return;
+  const registros = await cargarEmpresas(feria);
+  if (eventoActual?.id !== feria.id) return;
+  empresas = registros.filter(empresa => esMarketing() || empresa.assigned);
   vistaCatalogo = vista;
+  $('#edicion-actual').textContent = `${feria.name} · ${feria.year}`;
+  $('#volver').textContent = '← Ver empresas de esta edición';
   $('#feria-titulo').textContent = vista === 'pendientes' ? 'Mis pendientes' : 'Mi cartera';
   const asignacion = usuario.role === 'sdr' ? 'SDR' : 'Consultor';
-  const textoAsignacion = esMarketing() ? 'Empresas de todas las ferias' : `Asignadas a ${usuario.assignment || usuario.name} en la columna ${asignacion}`;
+  const textoAsignacion = esMarketing() ? 'Empresas de esta edición' : `Asignadas a ${usuario.assignment || usuario.name} en la columna ${asignacion}`;
   $('#fuente').textContent = `${textoAsignacion}${vista === 'pendientes' ? ' · Visita pendiente' : ''}`;
   $('#buscar').value = '';
   $('.acciones-excel').hidden = true;
   $('#renombrar-feria').hidden = true;
+  $('#checklist').hidden = vista !== 'pendientes';
+  $('#visitas-pendientes-titulo').hidden = vista !== 'pendientes';
   pantalla('catalogo');
   listar();
-  if (catalogos.some(resultado => resultado.status === 'rejected')) {
-    $('#mensaje').textContent = 'Algunas ferias no están disponibles en este dispositivo. Abrilas con conexión para incluirlas.';
+  if (vista === 'pendientes') {
+    restablecerTarea();
+    await cargarTareas().catch(error => { $('#tareas-estado').textContent = error.message; });
   }
   await estadoConexion();
+}
+
+async function actualizarVista() {
+  if (!usuario || document.hidden || !navigator.onLine || actualizandoVista || $('#ficha').open
+      || !['portada', 'ediciones', 'catalogo'].includes(paginaActual)
+      || !$('#renombrar-feria').hidden || $('#importar').disabled) return;
+  actualizandoVista = true;
+  const cuenta = usuario.id;
+  const vista = numeroVista;
+  const vigente = () => usuario?.id === cuenta && numeroVista === vista && !$('#ficha').open;
+  try {
+    const ferias = await consultar('events');
+    if (!vigente() || sinConexion) return;
+    if (JSON.stringify(eventos) !== JSON.stringify(ferias)) {
+      eventos = ferias;
+      mostrarPortada();
+      if (paginaActual === 'ediciones') mostrarEdiciones(feriaSeleccionada);
+    }
+    if (paginaActual !== 'catalogo') return;
+    const feria = ferias.find(item => item.id === eventoActual?.id);
+    if (!feria?.accessible) {
+      mostrarEdiciones(feriaSeleccionada);
+      return;
+    }
+    const registros = await cargarEmpresas(feria);
+    const actuales = vistaCatalogo === 'feria' || esMarketing() ? registros : registros.filter(empresa => empresa.assigned);
+    if (vigente()) {
+      eventoActual = feria;
+      $('#edicion-actual').textContent = `${feria.name} · ${feria.year}`;
+      if (vistaCatalogo === 'feria') $('#feria-titulo').textContent = feria.name;
+    }
+    if (vigente() && JSON.stringify(empresas) !== JSON.stringify(actuales)) {
+      empresas = actuales;
+      listar();
+    }
+  } catch {
+    // La vista sigue disponible con los datos que ya tenía.
+  } finally {
+    actualizandoVista = false;
+  }
+}
+window.setInterval(actualizarVista, 10000);
+window.addEventListener('focus', actualizarVista);
+
+const plantillasTareas = {
+  visita: ['Revisar la ficha de la empresa', 'Confirmar el horario de la visita', 'Preparar el material de la visita'],
+  seguimiento: ['Registrar el resultado de la visita', 'Enviar la información acordada', 'Programar el próximo seguimiento'],
+};
+let tareaEditada;
+
+function restablecerTarea() {
+  tareaEditada = null;
+  $('#tarea-form').reset();
+  $('#tarea-guardar').textContent = 'Agregar tarea';
+  $('#tarea-cancelar').hidden = true;
+}
+
+function nuevaTarea(title, date, time) {
+  return { id: crypto.randomUUID(), title, date, time, done: false, version: 0 };
+}
+
+async function cargarTareas() {
+  const cuenta = usuario.id;
+  const edicion = eventoActual?.id;
+  if (!edicion) return;
+  const ruta = `tasks?event=${encodeURIComponent(edicion)}`;
+  const [guardadas, anteriores] = await Promise.all([consultar(ruta, []), consultar('tasks', [])]);
+  const pendientes = await pendientesDe(cuenta).catch(() => []);
+  if (usuario?.id !== cuenta || eventoActual?.id !== edicion) return;
+  const tareas = new Map(guardadas.map(tarea => [tarea.id, tarea]));
+  const antiguas = new Map(anteriores.map(tarea => [tarea.id, tarea]));
+  for (const op of pendientes.filter(operacion => operacion.ruta === ruta || operacion.ruta === 'tasks')) {
+    for (const cambio of op.cuerpo.changes) {
+      const lista = op.ruta === ruta ? tareas : antiguas;
+      if (cambio.moverAnterior) antiguas.delete(cambio.id);
+      const anterior = lista.get(cambio.id);
+      if ((anterior?.version || 0) > cambio.version) continue;
+      lista.set(cambio.id, { ...cambio, version: cambio.version + 1, pending: true,
+        completed_at: cambio.done ? anterior?.completed_at || op.orden / 1000 : null });
+    }
+  }
+  const lista = $('#lista-tareas');
+  lista.replaceChildren();
+  const ordenadas = [...tareas.values()].sort((a, b) => Number(a.done) - Number(b.done)
+    || (a.date || '9999').localeCompare(b.date || '9999') || a.time.localeCompare(b.time) || a.title.localeCompare(b.title));
+  if (!ordenadas.length) lista.append(texto('p', 'Todavía no agregaste tareas.', 'ayuda'));
+  for (const tarea of ordenadas) {
+    const fila = texto('div', '', 'tarea-fila');
+    const info = document.createElement('div');
+    const etiqueta = document.createElement('label');
+    const casilla = document.createElement('input');
+    casilla.type = 'checkbox';
+    casilla.checked = tarea.done;
+    etiqueta.append(casilla, texto('span', tarea.title, tarea.done ? 'tarea-hecha' : ''));
+    info.append(etiqueta);
+    const fecha = tarea.date ? `${tarea.date.split('-').reverse().join('/')}${tarea.time ? ` · ${tarea.time}` : ''}` : 'Sin fecha prevista';
+    const completada = tarea.completed_at ? `Completada el ${new Date(tarea.completed_at * 1000).toLocaleString('es-PY')}` : '';
+    info.append(texto('small', [fecha, completada, tarea.pending ? 'Pendiente de sincronización' : ''].filter(Boolean).join(' · '), 'ayuda'));
+    const editar = texto('button', 'Editar', 'secundario');
+    editar.type = 'button';
+    editar.setAttribute('aria-label', `Editar tarea ${tarea.title}`);
+    editar.addEventListener('click', () => {
+      tareaEditada = tarea;
+      $('#tarea-titulo').value = tarea.title;
+      $('#tarea-fecha').value = tarea.date;
+      $('#tarea-hora').value = tarea.time;
+      $('#tarea-guardar').textContent = 'Guardar cambios';
+      $('#tarea-cancelar').hidden = false;
+      $('#tarea-titulo').focus();
+    });
+    casilla.addEventListener('change', async () => {
+      casilla.disabled = true;
+      try {
+        await guardarChecklist([{ ...tarea, done: casilla.checked }], casilla.checked ? 'Tarea completada.' : 'Tarea reabierta.');
+      } catch (error) {
+        casilla.checked = tarea.done;
+        $('#tareas-estado').textContent = error.message;
+      } finally { casilla.disabled = false; }
+    });
+    fila.append(info, editar);
+    lista.append(fila);
+  }
+  $('#tareas-anteriores').hidden = !antiguas.size;
+  $('#lista-tareas-anteriores').replaceChildren();
+  for (const tarea of antiguas.values()) {
+    const fila = texto('div', '', 'tarea-fila');
+    const mover = texto('button', 'Incorporar a esta edición', 'secundario');
+    mover.addEventListener('click', async () => {
+      mover.disabled = true;
+      try { await guardarChecklist([{ ...tarea, moverAnterior: true }], 'Tarea incorporada.'); }
+      catch (error) { $('#tareas-estado').textContent = error.message; }
+      finally { mover.disabled = false; }
+    });
+    fila.append(texto('span', tarea.title), mover);
+    $('#lista-tareas-anteriores').append(fila);
+  }
+}
+
+async function guardarChecklist(cambios, mensaje) {
+  if (cambios.some(tarea => !tarea.title.trim() || (tarea.time && !tarea.date))) {
+    throw new Error('Ingresá el nombre de la tarea y elegí una fecha si querés asignarle una hora.');
+  }
+  if (!eventoActual) throw new Error('Elegí primero una edición de la feria.');
+  const pendiente = await guardarOperacion({ changes: cambios }, `tasks?event=${encodeURIComponent(eventoActual.id)}`);
+  await cargarTareas();
+  $('#tareas-estado').textContent = pendiente ? 'Cambio guardado en este dispositivo. Pendiente de sincronización.' : mensaje;
+}
+
+$('#tarea-cancelar').addEventListener('click', restablecerTarea);
+$('#tarea-form').addEventListener('submit', evento => {
+  evento.preventDefault();
+  conEnvio(evento.currentTarget, $('#tareas-estado'), async () => {
+    const { title, date, time } = Object.fromEntries(new FormData(evento.currentTarget));
+    const tarea = tareaEditada ? { ...tareaEditada, title, date, time } : nuevaTarea(title, date, time);
+    await guardarChecklist([tarea], tareaEditada ? 'Cambios guardados.' : 'Tarea agregada.');
+    restablecerTarea();
+  });
+});
+$('#tarea-agregar-plantilla').addEventListener('click', async evento => {
+  const boton = evento.currentTarget;
+  boton.disabled = true;
+  try {
+    const tareas = plantillasTareas[$('#tarea-plantilla').value]
+      .map(titulo => nuevaTarea(titulo, $('#tarea-fecha').value, $('#tarea-hora').value));
+    await guardarChecklist(tareas, 'Checklist agregado.');
+  } catch (error) { $('#tareas-estado').textContent = error.message; }
+  finally { boton.disabled = false; }
+});
+
+async function enviarExcel(ruta, parametros, archivo) {
+  if (archivo.size > 12 * 1024 * 1024) throw new Error('Elegí un archivo Excel de hasta 12 MB.');
+  const respuesta = await fetch(`/api/${ruta}?${new URLSearchParams(parametros)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: archivo,
+  });
+  const datos = await respuesta.json();
+  if (!respuesta.ok) throw new Error(datos.error);
+  return datos;
 }
 
 $('#importar').addEventListener('change', async evento => {
@@ -535,12 +802,7 @@ $('#importar').addEventListener('change', async evento => {
   entrada.disabled = true;
   $('#estado-excel').textContent = 'Importando la planilla…';
   try {
-    if (archivo.size > 12 * 1024 * 1024) throw new Error('Elegí un archivo Excel de hasta 12 MB.');
-    const respuesta = await fetch(`/api/import?event=${encodeURIComponent(feria.id)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: archivo,
-    });
-    const datos = await respuesta.json();
-    if (!respuesta.ok) throw new Error(datos.error);
+    const datos = await enviarExcel('import', { event: feria.id }, archivo);
     if (eventoActual.id === feria.id) {
       eventos = await consultar('events');
       await abrirEvento(eventos.find(evento => evento.id === feria.id));
@@ -651,13 +913,24 @@ function tarjetaRegistro(registro, campos, titulo) {
   return tarjeta;
 }
 
+function columnasDeFicha(columnas) {
+  const orden = columnas.map((columna, indice) => ({ columna, indice }));
+  const adherente = orden.findIndex(({ columna }) => claveCampo(columna) === 'ADHERENTE?');
+  if (adherente < 0) return orden;
+  const [campo] = orden.splice(adherente, 1);
+  const cliente = orden.findIndex(({ columna }) => claveCampo(columna) === 'CLIENTE?');
+  orden.splice(cliente < 0 ? orden.length : cliente + 1, 0, campo);
+  return orden;
+}
+
 function mostrarFicha() {
   const datos = $('#resumen-datos');
   datos.replaceChildren();
-  eventoActual.columns.forEach((columna, indice) => {
+  columnasDeFicha(eventoActual.columns).forEach(({ columna, indice }) => {
     if (camposContacto.includes(claveCampo(columna))) return;
     const par = texto('div', '', /OBSERVACIONES/.test(claveCampo(columna)) ? 'resumen-ancho' : '');
-    par.append(texto('dt', columna.trim()), texto('dd', mostrar(detalleActual.values[indice])));
+    const titulo = claveCampo(columna) === 'ADHERENTE?' ? 'Adherente / parcería' : columna.trim();
+    par.append(texto('dt', titulo), texto('dd', mostrar(detalleActual.values[indice])));
     datos.append(par);
   });
   $('#resumen-estado').textContent = `Estado de visita · ${mostrar(valorCampo(empresaActual, 'STATUS VISITA'))}`;
@@ -677,7 +950,7 @@ function mostrarFicha() {
       `Visita o seguimiento · ${registro.details.status}`));
   }
   if (!resumenContactos.childElementCount) resumenContactos.append(texto('p', 'Todavía no hay contactos registrados.', 'ayuda'));
-  if (!resumenVisitas.childElementCount) resumenVisitas.append(texto('p', 'Todavía no hay visitas o seguimientos registrados en Data App.', 'ayuda'));
+  if (!resumenVisitas.childElementCount) resumenVisitas.append(texto('p', 'Todavía no hay visitas o seguimientos registrados en DataApp.', 'ayuda'));
 }
 
 const formulariosRegistro = [
@@ -768,7 +1041,7 @@ async function abrirFicha(empresa, registrarConsulta = true) {
   $('#tab-datos').hidden = !esMarketing();
   $('#campos').replaceChildren();
   lectoresFicha = new Map();
-  eventoActual.columns.forEach((columna, indice) => {
+  columnasDeFicha(eventoActual.columns).forEach(({ columna, indice }) => {
     if (camposContacto.includes(claveCampo(columna))) return;
     if (!esMarketing()) return;
     const { nodo, leer } = crearCampo(columna, indice, detalle.values[indice], nombresAsignacion);
@@ -882,7 +1155,7 @@ try {
     if (!error.sinConexion) throw error;
     sinConexion = true;
     sesion = { user: await leerCache('sesion').catch(() => null), setup: false };
-    if (!sesion.user) throw new Error('Ingresá una vez con conexión para usar Data App sin internet en este dispositivo.');
+    if (!sesion.user) throw new Error('Ingresá una vez con conexión para usar DataApp sin internet en este dispositivo.');
   }
   usuario = sesion.user;
   requiereConfiguracion = sesion.setup;
@@ -893,7 +1166,7 @@ try {
     $('#login-rol').disabled = requiereConfiguracion;
     if (requiereConfiguracion) {
       $('#acceso-titulo').textContent = 'Creá tu cuenta administradora';
-      $('#acceso-texto').textContent = 'Es el primer ingreso. Elegí tus datos para administrar Data App y sumar a tu equipo.';
+      $('#acceso-texto').textContent = 'Es el primer ingreso. Elegí tus datos para administrar DataApp y sumar a tu equipo.';
       $('#nombre-inicial').hidden = false;
       $('#nombre-usuario').required = true;
       $('#password').minLength = 10;

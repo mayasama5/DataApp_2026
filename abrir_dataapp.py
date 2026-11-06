@@ -1,4 +1,4 @@
-"""Servidor local de Data App. Las cuentas y los cambios se guardan en SQLite."""
+"""Servidor local de DataApp. Las cuentas y los cambios se guardan en SQLite."""
 import hashlib
 import io
 import json
@@ -15,11 +15,12 @@ from threading import Event, Thread
 from urllib.parse import parse_qs, urlsplit
 from zipfile import BadZipFile, ZipFile
 
-from almacenamiento import administra, asignada, conectar, hash_password, inicializar, mismos_valores, nombre_normalizado, nueva_sesion, registrar, usuario_fila, usuario_sesion, verificar
+from almacenamiento import acceso_feria, administra, aplicar_catalogos, asignada, conectar, hash_password, inicializar, mismos_valores, nombre_normalizado, nueva_sesion, registrar, usuario_fila, usuario_sesion, verificar
 
 CARPETA = Path(__file__).resolve().parent
 PUBLICOS = {'/', '/index.html', '/app.js', '/estilos.css', '/campos.js', '/offline.js', '/dictado.js',
-            '/captura-voz.js', '/sw.js', '/manifest.webmanifest', '/icono.svg'}
+            '/captura-voz.js', '/sw.js', '/manifest.webmanifest', '/icono.svg',
+            '/logo-dataapp-192.png', '/logo-dataapp-512.png'}
 MAX_EXCEL = 12 * 1024 * 1024
 PERFILES = {'consultor', 'sdr', 'marketing'}
 ESTADOS_VISITA = {'REALIZADO', 'PENDIENTE'}
@@ -95,6 +96,17 @@ class DataAppHandler(SimpleHTTPRequestHandler):
             raise ErrorApp('Formato de solicitud inválido.')
         return datos
 
+    def excel_subido(self):
+        longitud = int(self.headers.get('Content-Length', 0))
+        if not 0 < longitud <= MAX_EXCEL:
+            raise ErrorApp('Elegí un archivo Excel de hasta 12 MB.', 413)
+        archivo = io.BytesIO(self.rfile.read(longitud))
+        with ZipFile(archivo) as comprimido:
+            if sum(entrada.file_size for entrada in comprimido.infolist()) > 100 * 1024 * 1024:
+                raise ErrorApp('La planilla descomprimida supera el tamaño permitido.', 413)
+        archivo.seek(0)
+        return archivo
+
     def do_GET(self):
         ruta = urlsplit(self.path).path
         if ruta.startswith('/api/'):
@@ -119,7 +131,7 @@ class DataAppHandler(SimpleHTTPRequestHandler):
             if self.headers.get('Host') != host:
                 raise ErrorApp('Dirección de acceso inválida.', 403)
             if metodo == 'POST' and self.headers.get('Origin') != self.server.origin:
-                raise ErrorApp('Abrí Data App desde su dirección configurada.', 403)
+                raise ErrorApp('Abrí DataApp desde su dirección configurada.', 403)
             self.api(metodo, ruta)
         except ErrorApp as error:
             self.responder({'error': error.mensaje}, error.estado)
@@ -191,6 +203,17 @@ class DataAppHandler(SimpleHTTPRequestHandler):
         if not usuario:
             raise ErrorApp('Ingresá con tu cuenta para continuar.', 401)
 
+        if ruta == '/api/tasks':
+            from tareas import ErrorTareas, guardar_tareas, listar_tareas
+            evento = parse_qs(urlsplit(self.path).query).get('event', [None])[0]
+            try:
+                if metodo == 'POST':
+                    guardar_tareas(usuario, self.cuerpo(), evento)
+                    return self.responder({'ok': True})
+                return self.responder(listar_tareas(usuario, evento))
+            except ErrorTareas as error:
+                raise ErrorApp(str(error), error.estado)
+
         if metodo == 'GET' and ruta == '/api/voz':
             from voz import disponible
             return self.responder({'disponible': disponible()})
@@ -238,21 +261,46 @@ class DataAppHandler(SimpleHTTPRequestHandler):
         if metodo == 'POST' and ruta == '/api/events':
             if not administra(usuario):
                 raise ErrorApp('Solo Marketing puede agregar ferias.', 403)
-            datos = self.cuerpo()
+            con_excel = self.headers.get('Content-Type') == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            datos = ({clave: valores[0] for clave, valores in parse_qs(urlsplit(self.path).query).items()}
+                     if con_excel else self.cuerpo())
             nombre = datos.get('name', '').strip()
             hoja = datos.get('sheet', '').strip() or 'Empresas'
+            try:
+                anio = int(datos.get('year', 2026))
+            except (ValueError, TypeError):
+                raise ErrorApp('Elegí un año válido.')
+            if not 2000 <= anio <= 2100:
+                raise ErrorApp('Elegí un año entre 2000 y 2100.')
             if not nombre or len(nombre) > 120 or len(hoja) > 31 or re.search(r'[:\\/?*\[\]]', hoja):
                 raise ErrorApp('Ingresá un nombre de feria y un nombre válido para la pestaña Excel.')
-            if hoja.casefold() in {'data app', 'data app base', 'contactos data app', 'actividades data app'}:
+            if hoja.casefold() in {'data app', 'data app base', 'contactos data app', 'actividades data app', 'contactos dataapp', 'actividades dataapp'}:
                 raise ErrorApp('Elegí otro nombre para la pestaña de empresas.')
-            from excel import COLUMNAS_NUEVA_FERIA
+            from excel import COLUMNAS_NUEVA_FERIA, REQUERIDAS
             identificador = secrets.token_hex(16)
+            nombre_archivo = f'{nombre} {anio}.xlsx'
+            catalogo = None
+            if con_excel:
+                from importar import importar
+                try:
+                    catalogo = importar(self.excel_subido(), identificador, nombre, hoja, nombre_archivo)
+                except (BadZipFile, KeyError, StopIteration):
+                    raise ErrorApp('El archivo debe ser un Excel con la pestaña de empresas indicada.')
+                except ValueError as error:
+                    raise ErrorApp(str(error))
+                if not REQUERIDAS.issubset({campo.strip() for campo in catalogo['columnas']}):
+                    raise ErrorApp('El Excel debe incluir las columnas de empresa, consultor, SDR, estado de visita y contacto.')
             with conectar() as db:
                 db.execute('BEGIN IMMEDIATE')
-                if any(nombre_normalizado(f['name']) == nombre_normalizado(nombre) for f in db.execute('SELECT name FROM events')):
-                    raise ErrorApp('Ya existe una feria con ese nombre.', 409)
-                db.execute('INSERT INTO events(id,name,source,sheet,columns_json) VALUES(?,?,?,?,?)',
-                           (identificador, nombre, f'{nombre}.xlsx', hoja, json.dumps(COLUMNAS_NUEVA_FERIA, ensure_ascii=False)))
+                if any(nombre_normalizado(f['name']) == nombre_normalizado(nombre)
+                       for f in db.execute('SELECT name FROM events WHERE year=?', (anio,))):
+                    raise ErrorApp('Ya existe una edición de esta feria para ese año.', 409)
+                if catalogo:
+                    aplicar_catalogos(db, [{**catalogo, 'year': anio}])
+                    registrar(db, usuario['id'], 'Excel importado', f"{len(catalogo['registros'])} registros", identificador)
+                else:
+                    db.execute('INSERT INTO events(id,name,source,sheet,columns_json,year) VALUES(?,?,?,?,?,?)',
+                               (identificador, nombre, nombre_archivo, hoja, json.dumps(COLUMNAS_NUEVA_FERIA, ensure_ascii=False), anio))
                 registrar(db, usuario['id'], 'Feria creada', evento_id=identificador)
             return self.responder({'id': identificador}, 201)
 
@@ -260,7 +308,7 @@ class DataAppHandler(SimpleHTTPRequestHandler):
             if not administra(usuario):
                 raise ErrorApp('Solo Marketing puede ver las ferias archivadas.', 403)
             with conectar() as db:
-                archivadas = [dict(fila) for fila in db.execute('SELECT id,name FROM events WHERE archived_at IS NOT NULL ORDER BY name')]
+                archivadas = [dict(fila) for fila in db.execute('SELECT id,name,year FROM events WHERE archived_at IS NOT NULL ORDER BY name,year')]
             return self.responder(archivadas)
 
         if metodo == 'POST' and ruta.startswith('/api/events/'):
@@ -273,7 +321,7 @@ class DataAppHandler(SimpleHTTPRequestHandler):
                 raise ErrorApp('La acción sobre la feria no es válida.')
             with conectar() as db:
                 db.execute('BEGIN IMMEDIATE')
-                feria = db.execute('SELECT name,archived_at FROM events WHERE id=?', (evento_id,)).fetchone()
+                feria = db.execute('SELECT name,year,archived_at FROM events WHERE id=?', (evento_id,)).fetchone()
                 if not feria:
                     raise ErrorApp('No encontramos esa feria.', 404)
                 if accion == 'edit':
@@ -283,7 +331,7 @@ class DataAppHandler(SimpleHTTPRequestHandler):
                     if feria['archived_at'] is not None:
                         raise ErrorApp('Restaurá la feria antes de editarla.', 409)
                     if any(nombre_normalizado(f['name']) == nombre_normalizado(nombre)
-                           for f in db.execute('SELECT name FROM events WHERE id!=?', (evento_id,))):
+                           for f in db.execute('SELECT name FROM events WHERE id!=? AND year=?', (evento_id, feria['year']))):
                         raise ErrorApp('Ya existe otra feria con ese nombre.', 409)
                     if feria['name'] != nombre:
                         db.execute('UPDATE events SET name=? WHERE id=?', (nombre, evento_id))
@@ -300,11 +348,11 @@ class DataAppHandler(SimpleHTTPRequestHandler):
             persona = None if administra(usuario) else usuario['id']
             with conectar() as db:
                 filas = db.execute('''
-                    SELECT l.id AS id,l.created_at AS created_at,u.name AS author,e.name AS event,l.action,l.description,'' AS company,0 AS source
+                    SELECT l.id AS id,l.created_at AS created_at,u.name AS author,e.name || ' · ' || e.year AS event,l.action,l.description,'' AS company,0 AS source
                     FROM activity_log l JOIN users u ON u.id=l.user_id LEFT JOIN events e ON e.id=l.event_id
                     WHERE (? IS NULL OR l.user_id=?)
                     UNION ALL
-                    SELECT a.id,a.created_at,u.name,e.name,
+                    SELECT a.id,a.created_at,u.name,e.name || ' · ' || e.year,
                            CASE a.kind WHEN 'contact' THEN 'Contacto agregado' WHEN 'visit' THEN 'Visita registrada'
                              WHEN 'record_edit' THEN 'Registro actualizado'
                              WHEN 'record_delete' THEN CASE json_extract(a.details_json,'$.kind')
@@ -365,17 +413,9 @@ class DataAppHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 return self.wfile.write(contenido)
             if metodo == 'POST' and ruta == '/api/import':
-                longitud = int(self.headers.get('Content-Length', 0))
-                if not 0 < longitud <= MAX_EXCEL:
-                    raise ErrorApp('Elegí un archivo Excel de hasta 12 MB.', 413)
-                archivo = io.BytesIO(self.rfile.read(longitud))
                 from excel import recibir
                 try:
-                    with ZipFile(archivo) as comprimido:
-                        if sum(entrada.file_size for entrada in comprimido.infolist()) > 100 * 1024 * 1024:
-                            raise ErrorApp('La planilla descomprimida supera el tamaño permitido.', 413)
-                    archivo.seek(0)
-                    conflictos = recibir(archivo, evento)
+                    conflictos = recibir(self.excel_subido(), evento)
                 except (BadZipFile, KeyError, StopIteration):
                     raise ErrorApp('El archivo debe ser un Excel con la pestaña principal de esta feria.')
                 except ValueError as error:
@@ -386,19 +426,23 @@ class DataAppHandler(SimpleHTTPRequestHandler):
 
         if metodo == 'GET' and ruta == '/api/events':
             with conectar() as db:
-                eventos = [dict(fila) for fila in db.execute('SELECT * FROM events WHERE archived_at IS NULL ORDER BY name')]
+                eventos = [dict(fila) for fila in db.execute('SELECT * FROM events WHERE archived_at IS NULL ORDER BY name,year')]
                 for evento in eventos:
+                    evento['accessible'] = acceso_feria(db, usuario, evento)
                     evento['columns'] = json.loads(evento.pop('columns_json'))
-                    evento['count'] = db.execute('SELECT COUNT(*) FROM companies WHERE event_id=?', (evento['id'],)).fetchone()[0]
+                    evento['count'] = (db.execute('SELECT COUNT(*) FROM companies WHERE event_id=?', (evento['id'],)).fetchone()[0]
+                                       if evento['accessible'] else 0)
             return self.responder(eventos)
 
         if metodo == 'GET' and ruta == '/api/companies':
             evento = parse_qs(urlsplit(self.path).query).get('event', [''])[0]
             with conectar() as db:
-                feria = db.execute('SELECT columns_json FROM events WHERE id=? AND archived_at IS NULL', (evento,)).fetchone()
+                feria = db.execute('SELECT id,columns_json FROM events WHERE id=? AND archived_at IS NULL', (evento,)).fetchone()
                 if not feria:
                     raise ErrorApp('No encontramos esa feria.', 404)
-                columnas = json.loads(feria[0])
+                if not acceso_feria(db, usuario, feria):
+                    raise ErrorApp('Tu cuenta no tiene asignaciones en esta edición.', 403)
+                columnas = json.loads(feria['columns_json'])
                 empresas = [{'id': f['id'], 'row': f['source_row'], 'values': json.loads(f['values_json']),
                              'version': f['version'], 'contactsSearch': f['contacts_search'] or ''}
                             for f in db.execute('''SELECT c.*,
@@ -423,6 +467,8 @@ class DataAppHandler(SimpleHTTPRequestHandler):
                 estado_origen = json.loads(empresa['source_json'])[indice_estado]
                 if empresa['archived_at'] is not None:
                     raise ErrorApp('Esta feria está archivada.', 409)
+                if not acceso_feria(db, usuario, {'id': empresa['event_id'], 'columns_json': empresa['columns_json']}):
+                    raise ErrorApp('Tu cuenta no tiene asignaciones en esta edición.', 403)
                 if metodo == 'GET':
                     if parse_qs(urlsplit(self.path).query).get('consulta') == ['1']:
                         registrar(db, usuario['id'], 'Ficha consultada', str(valores_actuales[0]), empresa['event_id'])
@@ -584,7 +630,7 @@ if __name__ == '__main__':
     try:
         servidor = crear_servidor()
     except OSError:
-        print('Data App ya está abierta o su dirección está ocupada.', flush=True)
+        print('DataApp ya está abierta o su dirección está ocupada.', flush=True)
         if '--sin-navegador' not in sys.argv:
             webbrowser.open('http://127.0.0.1:8765/')
         raise SystemExit(0)
@@ -592,7 +638,7 @@ if __name__ == '__main__':
         from excel import vigilar
         detener = Event()
         Thread(target=vigilar, args=(detener,), daemon=True).start()
-        print(f'Data App disponible en {servidor.origin}/', flush=True)
+        print(f'DataApp disponible en {servidor.origin}/', flush=True)
         if '--sin-navegador' not in sys.argv:
             webbrowser.open('http://127.0.0.1:8765/')
         try:
